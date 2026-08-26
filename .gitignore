@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+
+# Environment variables (NEVER commit these)
+.env
+.env.local
+.env.*.local
+
+# Backups & Archives
+*.zip
+*.tar.gz
+
+# IDE & OS
+.DS_Store
+.vscode/

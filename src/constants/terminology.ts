@@ -1,0 +1,117 @@
+export const TERMS = {
+  // User & Auth
+  USER: 'Explorer 🧭',
+  NEW_USER: 'New Explorer 🧭',
+  LOGIN: 'Enter Universe 🌌',
+  LOGOUT: 'Leave Universe 🌌',
+  SIGNUP: 'Join the Universe 🌌',
+  RESET_PASSWORD: 'Reset Signal 🔐',
+  DELETED_USER: 'Faded Explorer 🌑',
+
+  // Profiles & Accounts
+  PROFILE: 'Your Sky 🌌',
+  ACCOUNT: 'Sky 🌌',
+  BIO: 'Star Story ⭐',
+  USERNAME: 'Star Name ⭐',
+  AVATAR: 'Star Portrait ⭐',
+  COVER: 'Sky Cover 🌌',
+  SKY_COVER: 'Sky Cover 🌌',
+  PRIVATE_ACCOUNT: 'Private Sky 🔒',
+  PUBLIC_ACCOUNT: 'Open Sky 🌌',
+  VERIFIED: 'Guiding Star 🌟',
+  VERIFIED_BADGE: 'Guiding Star 🌟',
+
+  // Posts & Creation
+  POST: 'Star ⭐',
+  CREATE_POST: 'Create a Star ⭐',
+  EDIT_POST: 'Reform Star ⭐',
+  DELETE_POST: 'Collapse Star 💥',
+  DRAFT: 'Unlit Star 🌑⭐',
+  PINNED_POST: 'North Star ⭐',
+  FEATURED_POST: 'Featured Star 🌟',
+  VIRAL_POST: 'Supernova 💥⭐',
+  POPULAR_POST: 'Bright Star 🌟',
+  EXPIRED_POST: 'Faded Star 🌠',
+  SIMILAR_POSTS: 'Constellation ✨',
+
+  // Actions & Engagement
+  LIKE: 'Glow ✨',
+  UNLIKE: 'Dim',
+  COMMENT: 'Echo 💫',
+  REPLY: 'Echo Back 💫',
+  SHARE: 'Send to Orbit 🛰️',
+  REPOST: 'Reignite 🔥⭐',
+  SAVE: 'Stargaze 🔖',
+  VIEWS: 'Star Gazes 👀',
+  REACH: 'Cosmic Reach 🌌',
+  ENGAGEMENT: 'Cosmic Activity ✨',
+
+  // Social & Relationships
+  FOLLOW: 'Enter Orbit 🪐',
+  UNFOLLOW: 'Leave Orbit 🪐',
+  FOLLOWER: 'Orbiter 🪐',
+  FOLLOWERS: 'Orbiters 🪐',
+  FOLLOWING: 'Your Orbit 🪐',
+  FRIEND: 'Constellation Mate ✨',
+  CONNECTION: 'Star Link 🔗',
+  CONNECT: 'Link Up 🔗',
+  ONLINE: 'In Orbit 🪐',
+  OFFLINE: 'Out of Orbit',
+
+  // Navigation & Views
+  FEED: 'Galaxy View 🌌',
+  HOME: 'Home Galaxy 🌌',
+  EXPLORE: 'Explore the Universe 🔭',
+  TRENDING: 'Brightest Stars 🌟',
+  SEARCH: 'Scan the Universe 🔭',
+  SEARCH_PLACEHOLDER: 'Scan the Universe... 🔭',
+  UNIVERSE: 'Universe 🌌',
+  COMMUNITY: 'Galaxy 🌌',
+  COMMUNITIES: 'Galaxies 🌌',
+  HASHTAG: 'Nebula 🌫️✨',
+  SUGGESTIONS: 'Potential Orbits 🪐',
+
+  // Chat & Signals & Broadcasts
+  MESSAGE: 'Signal 📡',
+  SEND_MESSAGE: 'Send Signal 📡',
+  CHAT: 'Signal Chain 📡',
+  GROUP_CHAT: 'Signal Cluster 📡✨',
+  CONVERSATION: 'Signal Flow 📡',
+  NOTIFICATIONS: 'Cosmic Signals 📡',
+  INBOX: 'Signal Hub 📡',
+  DIRECT_MESSAGES: 'Cosmic Signals 📡',
+  EXPLORER_CREW: 'Explorer Crew 🧭',
+  REMIX: 'Remix Star 🌀',
+  BROADCAST: 'Cosmic Broadcast 🌌📡',
+  GO_LIVE: 'Go Live Star 📡✨',
+  LIVE_STREAM: 'Star Stream 📡✨',
+  LIVE_STATION: 'Live Station 📡',
+
+  // Media Types
+  PHOTO: 'Captured Star 📸⭐',
+  VIDEO: 'Moving Star ⭐',
+  MEDIA: 'Cosmic Media 🌌',
+  LINK: 'Star Link 🔗',
+  EXTERNAL_LINK: 'Portal 🌀',
+
+  // Safety, Moderation & Roles
+  BLOCK: 'Eclipse 🌒',
+  UNBLOCK: 'End Eclipse',
+  MUTE: 'Quiet Orbit 🤫',
+  UNMUTE: 'Restore Orbit',
+  REPORT: 'Flag a Star 🚩',
+  REPORT_POST: 'Flag a Star 🚩',
+  REPORT_COMMENT: 'Flag Echo 🚩',
+  ADMIN: 'Galaxy Keeper 🛡️',
+  MODERATOR: 'Orbit Keeper 🛡️',
+  SETTINGS: 'Control Center ⚙️',
+
+  // System States
+  LOADING: 'Mapping the Universe... 🌌',
+  EMPTY_FEED: 'Your Galaxy Is Quiet 🌌',
+  NO_RESULTS: 'No Stars Found ⭐',
+  ERROR: 'Cosmic Disruption ⚠️',
+  WARNING: 'Cosmic Alert ⚠️',
+  TERMS_CONDITIONS: 'Cosmic Code 📜',
+  GUIDELINES: 'Galaxy Code 📜'
+};
