@@ -38,7 +38,9 @@ import {
   AlignJustify,
   Eye,
   FileEdit,
-  Type
+  Type,
+  Search,
+  Hash
 } from 'lucide-react';
 import { StarCluster, StarNode, StarVisibility, User, Universe, UnlitStarDraft, Galaxy } from '../types';
 import {
@@ -118,8 +120,11 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
   const [title, setTitle] = useState('');
   const [authorName, setAuthorName] = useState('Cosmic Explorer');
   const [authorHandle, setAuthorHandle] = useState('@stargazer');
-  const [cluster, setCluster] = useState<StarCluster>('Digital Art');
-  const [selectedUniverses, setSelectedUniverses] = useState<string[]>(['Digital Art']);
+  const [cluster, setCluster] = useState<StarCluster>('Cosmic');
+  const [selectedUniverses, setSelectedUniverses] = useState<string[]>([]);
+  const [universeSearchInput, setUniverseSearchInput] = useState('');
+  const [isUniverseDropdownOpen, setIsUniverseDropdownOpen] = useState(false);
+  const universeSearchContainerRef = useRef<HTMLDivElement>(null);
   const [content, setContent] = useState('');
   const [fontFamily, setFontFamily] = useState<string>('default');
   const [tagInput, setTagInput] = useState('');
@@ -133,8 +138,6 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
   const [errorMsg, setErrorMsg] = useState('');
   const [isAutoExtracting, setIsAutoExtracting] = useState(false);
   const [aiSuccessBadge, setAiSuccessBadge] = useState(false);
-  const [isCreatingCustomCluster, setIsCreatingCustomCluster] = useState(false);
-  const [customClusterInput, setCustomClusterInput] = useState('');
   const [customUniverseGlowColor, setCustomUniverseGlowColor] = useState<string>('#FFD700');
   const [selectedUniverseId, setSelectedUniverseId] = useState<string>('__create_new__');
   const [newUniverseName, setNewUniverseName] = useState<string>('');
@@ -214,6 +217,95 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
     return allStoredUniverses.filter((u) => u.isPrivate === isPrivate || !u.isPrivate);
   }, [allStoredUniverses, visibilityMode]);
 
+  // Close universe dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        universeSearchContainerRef.current &&
+        !universeSearchContainerRef.current.contains(event.target as Node)
+      ) {
+        setIsUniverseDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Collect all unique known universe names across storage and clusters
+  const allKnownUniverseNames = useMemo(() => {
+    const names = new Set<string>();
+    allStoredUniverses.forEach((u) => {
+      if (u.name) names.add(u.name);
+    });
+    availableClusters.forEach((c) => {
+      if (c) names.add(c);
+    });
+    return Array.from(names);
+  }, [allStoredUniverses, availableClusters]);
+
+  // Autocomplete suggestions based on search query
+  const filteredUniverseSuggestions = useMemo(() => {
+    const query = universeSearchInput.trim().toLowerCase().replace(/^#/, '');
+    if (!query) {
+      return allKnownUniverseNames.filter((name) => !selectedUniverses.includes(name)).slice(0, 10);
+    }
+    return allKnownUniverseNames.filter(
+      (name) => name.toLowerCase().includes(query) && !selectedUniverses.includes(name)
+    );
+  }, [universeSearchInput, allKnownUniverseNames, selectedUniverses]);
+
+  const isExactMatch = useMemo(() => {
+    const query = universeSearchInput.trim().toLowerCase().replace(/^#/, '');
+    if (!query) return true;
+    return allKnownUniverseNames.some((name) => name.toLowerCase() === query);
+  }, [universeSearchInput, allKnownUniverseNames]);
+
+  const handleAddUniverseTag = (universeName: string) => {
+    const raw = universeName.trim();
+    if (!raw) return;
+    const clean = raw.startsWith('#') ? raw.slice(1).trim() : raw;
+    if (!clean) return;
+
+    if (!selectedUniverses.includes(clean)) {
+      const updated = [...selectedUniverses, clean];
+      setSelectedUniverses(updated);
+      const primary = updated[0] || clean;
+      setCluster(primary);
+      const chosenColor = getClusterTheme(primary)?.color || getDynamicUniverseColor(primary);
+      setGlowColor(chosenColor);
+
+      // Persist new custom universe if not yet in stored list
+      const exists = allStoredUniverses.some((u) => u.name.toLowerCase() === clean.toLowerCase());
+      if (!exists) {
+        saveUniverse({
+          id: `univ-custom-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          name: clean,
+          isPrivate: false,
+          ownerId: currentUser?.id || 'guest-explorer',
+          memberIds: [currentUser?.id || 'guest-explorer'],
+          glowColor: chosenColor,
+        });
+      }
+    }
+
+    setUniverseSearchInput('');
+    setIsUniverseDropdownOpen(false);
+  };
+
+  const handleRemoveUniverseTag = (nameToRemove: string) => {
+    setSelectedUniverses((prev) => {
+      const updated = prev.filter((name) => name !== nameToRemove);
+      if (updated.length > 0) {
+        setCluster(updated[0]);
+        setGlowColor(getClusterTheme(updated[0])?.color || getDynamicUniverseColor(updated[0]));
+      } else {
+        setCluster('Cosmic');
+        setGlowColor('#FFD700');
+      }
+      return updated;
+    });
+  };
+
   // Reset or initialize state when opening modal or changing remix parent / editing star / initial draft
   useEffect(() => {
     if (isOpen) {
@@ -228,15 +320,17 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
       setShowDraftsList(false);
       setDraftToast(null);
       setIsPreviewMode(false);
+      setUniverseSearchInput('');
+      setIsUniverseDropdownOpen(false);
 
       if (editingStar) {
         // Reform Star Mode
         setTitle(editingStar.title);
         const univs = (editingStar.universes && editingStar.universes.length > 0)
           ? editingStar.universes
-          : [editingStar.cluster];
+          : (editingStar.cluster ? [editingStar.cluster] : []);
         setSelectedUniverses(univs);
-        setCluster(editingStar.cluster || univs[0] || 'Digital Art');
+        setCluster(editingStar.cluster || univs[0] || 'Cosmic');
         setGlowColor(editingStar.glowColor || '#FFD700');
         setTags(editingStar.tags || []);
         setContent(editingStar.content || '');
@@ -262,9 +356,9 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
         setTitle(initialDraft.title);
         const univs = (initialDraft.universes && initialDraft.universes.length > 0)
           ? initialDraft.universes
-          : [initialDraft.cluster];
+          : (initialDraft.cluster ? [initialDraft.cluster] : []);
         setSelectedUniverses(univs);
-        setCluster(initialDraft.cluster || univs[0] || 'Digital Art');
+        setCluster(initialDraft.cluster || univs[0] || 'Cosmic');
         setTags(initialDraft.tags || []);
         setContent(initialDraft.content || '');
         setFontFamily(initialDraft.fontFamily || 'default');
@@ -286,9 +380,9 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
         setTitle(`Remix: ${remixParentStar.title}`);
         const parentUnivs = (remixParentStar.universes && remixParentStar.universes.length > 0)
           ? remixParentStar.universes
-          : [remixParentStar.cluster];
+          : (remixParentStar.cluster ? [remixParentStar.cluster] : []);
         setSelectedUniverses(parentUnivs);
-        setCluster(parentUnivs[0] || remixParentStar.cluster);
+        setCluster(parentUnivs[0] || remixParentStar.cluster || 'Cosmic');
         setGlowColor(remixParentStar.glowColor || '#FFD700');
         setFontFamily(remixParentStar.fontFamily || 'default');
         // Inherit parent tags plus a remix tag
@@ -305,10 +399,11 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
       } else {
         setTitle('');
         setFontFamily('default');
-        const initialCluster = defaultCluster && defaultCluster !== 'All' ? defaultCluster : 'Digital Art';
-        setCluster(initialCluster);
-        setSelectedUniverses([initialCluster]);
-        setGlowColor(getClusterTheme(initialCluster)?.color || '#FFD700');
+        const initialCluster = defaultCluster && defaultCluster !== 'All' ? defaultCluster : '';
+        const initialUnivs = initialCluster ? [initialCluster] : [];
+        setCluster(initialCluster || 'Cosmic');
+        setSelectedUniverses(initialUnivs);
+        setGlowColor(initialCluster ? (getClusterTheme(initialCluster)?.color || getDynamicUniverseColor(initialCluster)) : '#FFD700');
         setContent('');
         const baseTags = defaultGalaxy ? [defaultGalaxy.tag] : [];
         if (initialTag) {
@@ -336,8 +431,6 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
       setErrorMsg('');
       setIsAutoExtracting(false);
       setAiSuccessBadge(false);
-      setIsCreatingCustomCluster(false);
-      setCustomClusterInput('');
     }
   }, [isOpen, remixParentStar, defaultCluster, defaultGalaxy, currentUser, editingStar, initialDraft]);
 
@@ -375,8 +468,8 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
     setTitle(draft.title || '');
     setContent(draft.content || '');
     setFontFamily(draft.fontFamily || 'default');
-    setCluster(draft.cluster || 'Digital Art');
-    setSelectedUniverses(draft.universes && draft.universes.length > 0 ? draft.universes : [draft.cluster || 'Digital Art']);
+    setCluster(draft.cluster || 'Cosmic');
+    setSelectedUniverses(draft.universes && draft.universes.length > 0 ? draft.universes : (draft.cluster ? [draft.cluster] : []));
     setSelectedGalaxyId(draft.galaxyId || '');
     setTags(draft.tags || []);
     setVisibilityMode(
@@ -404,53 +497,6 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
     refreshDrafts();
     setDraftToast('Unlit Star extinguished 🗑️');
     setTimeout(() => setDraftToast(null), 2500);
-  };
-
-  const displayClusters = React.useMemo(() => {
-    return Array.from(new Set([...availableClusters, ...selectedUniverses, cluster]));
-  }, [availableClusters, selectedUniverses, cluster]);
-
-  const toggleUniverse = (univ: string) => {
-    setSelectedUniverses((prev) => {
-      let updated: string[];
-      if (prev.includes(univ)) {
-        if (prev.length > 1) {
-          updated = prev.filter((u) => u !== univ);
-        } else {
-          updated = prev; // Keep at least one selected
-        }
-      } else {
-        updated = [...prev, univ];
-      }
-      const primary = updated[0] || univ;
-      setCluster(primary);
-      const theme = getClusterTheme(primary);
-      setGlowColor(theme.color);
-      return updated;
-    });
-  };
-
-  const handleAddCustomCluster = () => {
-    const trimmed = customClusterInput.trim();
-    if (!trimmed) {
-      setIsCreatingCustomCluster(false);
-      return;
-    }
-    setCluster(trimmed);
-    setSelectedUniverses((prev) => Array.from(new Set([...prev, trimmed])));
-    const chosenGlow = customUniverseGlowColor || getDynamicUniverseColor(trimmed);
-    setGlowColor(chosenGlow);
-    // Save to Universe Registry with customized glowColor
-    saveUniverse({
-      id: `univ-custom-${Date.now()}`,
-      name: trimmed,
-      isPrivate: false,
-      ownerId: currentUser?.id || 'guest-explorer',
-      memberIds: [currentUser?.id || 'guest-explorer'],
-      glowColor: chosenGlow,
-    });
-    setCustomClusterInput('');
-    setIsCreatingCustomCluster(false);
   };
 
   const toggleCollaborator = (userId: string) => {
@@ -601,9 +647,9 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
     }
 
     const finalCluster =
-      visibilityMode === 'shared' && cluster === 'Digital Art'
+      visibilityMode === 'shared' && (!cluster || cluster === 'Cosmic')
         ? (finalUniverseName || 'Our Universe')
-        : cluster;
+        : (cluster || 'Cosmic');
 
     const finalUniverses = selectedUniverses.length > 0
       ? selectedUniverses
@@ -923,7 +969,7 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="e.g. Algorithmic Solar Wind Shaders"
+                placeholder="e.g. Title of your star..."
                 className="w-full bg-slate-50 dark:bg-black/40 border border-slate-300 dark:border-white/10 text-slate-900 dark:text-white text-sm px-4 py-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400/40 placeholder-slate-400"
                 required
               />
@@ -1061,154 +1107,168 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
               })()}
             </div>
 
-            {/* Cluster Category Picker */}
-            <div>
-              <div className="flex items-center justify-between mb-2">
+            {/* TAG UNIVERSES (Instagram-style Search & Tag Input) */}
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                    Cluster Universes (Multi-Universe Tagging)
-                  </label>
-                  <span className="text-[10px] text-amber-800 dark:text-amber-300 font-semibold px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-400/30">
-                    {selectedUniverses.length} selected
-                  </span>
-                </div>
-                {!isCreatingCustomCluster && (
-                  <button
-                    type="button"
-                    id="btn-open-custom-cluster"
-                    onClick={() => setIsCreatingCustomCluster(true)}
-                    className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 dark:text-amber-300 hover:text-amber-900 dark:hover:text-amber-200 transition-colors cursor-pointer"
+                  <label
+                    htmlFor="input-universe-search"
+                    className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300"
                   >
-                    <Plus className="w-3 h-3" />
-                    <span>+ Custom Universe</span>
-                  </button>
-                )}
+                    TAG UNIVERSES 🌌
+                  </label>
+                  {selectedUniverses.length > 0 && (
+                    <span className="text-[10px] text-amber-800 dark:text-amber-300 font-semibold px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-400/30">
+                      {selectedUniverses.length} tagged
+                    </span>
+                  )}
+                </div>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:inline">
+                  Search or type custom #universe
+                </span>
               </div>
 
-              {/* Inline Custom Universe Input Form */}
-              {isCreatingCustomCluster && (
-                <div className="mb-3 p-3 rounded-xl bg-amber-500/10 border border-amber-400/30 backdrop-blur-md flex flex-col gap-2.5 animate-in fade-in zoom-in-95 duration-150 shadow-xs">
-                  <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
-                    <div className="relative flex-1">
-                      <input
-                        id="input-custom-cluster-name"
-                        type="text"
-                        value={customClusterInput}
-                        onChange={(e) => setCustomClusterInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            handleAddCustomCluster();
-                          } else if (e.key === 'Escape') {
-                            setIsCreatingCustomCluster(false);
-                            setCustomClusterInput('');
-                          }
-                        }}
-                        placeholder="e.g. Culinary Arts, Quantum Physics..."
-                        autoFocus
-                        className="w-full bg-white dark:bg-black/40 border border-slate-300 dark:border-white/10 text-slate-900 dark:text-white text-xs px-3 py-1.5 rounded-lg focus:outline-none placeholder-slate-400"
-                      />
-                    </div>
-                    <div className="flex items-center gap-1.5 justify-end">
-                      <button
-                        type="button"
-                        id="btn-confirm-custom-cluster"
-                        onClick={handleAddCustomCluster}
-                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-950 bg-gradient-to-r from-amber-300 to-yellow-400 hover:from-amber-200 hover:to-yellow-300 cursor-pointer transition-all shrink-0 shadow-xs"
+              {/* Search & Tag Input Container */}
+              <div ref={universeSearchContainerRef} className="relative">
+                <div
+                  onClick={() => {
+                    const input = document.getElementById('input-universe-search');
+                    if (input) input.focus();
+                  }}
+                  className="w-full min-h-[46px] p-2.5 bg-slate-50 dark:bg-black/40 border border-slate-300 dark:border-white/10 rounded-xl focus-within:ring-2 focus-within:ring-amber-400/40 focus-within:border-amber-400/50 flex flex-wrap items-center gap-2 transition-all cursor-text"
+                >
+                  {/* Selected Universe Chips */}
+                  {selectedUniverses.map((univ) => {
+                    const theme = getClusterTheme(univ);
+                    const glowCol = theme?.color || getDynamicUniverseColor(univ);
+                    return (
+                      <span
+                        key={univ}
+                        id={`universe-tag-chip-${univ.toLowerCase().replace(/[^a-z0-9]/g, '-')}`}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-amber-500/15 dark:bg-amber-400/15 text-slate-900 dark:text-amber-200 border border-amber-400/40 shadow-xs animate-in fade-in zoom-in-95 duration-150"
                       >
-                        Add Universe
-                      </button>
-                      <button
-                        type="button"
-                        id="btn-cancel-custom-cluster"
-                        onClick={() => {
-                          setIsCreatingCustomCluster(false);
-                          setCustomClusterInput('');
-                        }}
-                        className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 cursor-pointer transition-colors"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Universe Aura Color Swatches */}
-                  <div className="flex items-center gap-2 pt-1 border-t border-amber-400/20">
-                    <span className="text-[11px] font-medium text-amber-900 dark:text-amber-200/90">Universe Aura Color:</span>
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      {UNIVERSE_PRESET_COLORS.map((preset) => (
-                        <button
-                          key={preset.name}
-                          type="button"
-                          title={preset.name}
-                          onClick={() => setCustomUniverseGlowColor(preset.hex)}
-                          className={`w-5 h-5 rounded-full cursor-pointer transition-all flex items-center justify-center ${
-                            customUniverseGlowColor === preset.hex
-                              ? 'ring-2 ring-white scale-110 shadow-sm'
-                              : 'opacity-80 hover:opacity-100 hover:scale-105'
-                          }`}
-                          style={{ backgroundColor: preset.hex }}
-                        >
-                          {customUniverseGlowColor === preset.hex && (
-                            <Check className="w-2.5 h-2.5 text-black/80" />
-                          )}
-                        </button>
-                      ))}
-                      <label
-                        title="Custom Color"
-                        className="relative w-5 h-5 rounded-full border border-slate-400/50 cursor-pointer overflow-hidden flex items-center justify-center bg-conic-gradient hover:scale-105 transition-transform"
-                      >
-                        <input
-                          type="color"
-                          value={customUniverseGlowColor}
-                          onChange={(e) => setCustomUniverseGlowColor(e.target.value)}
-                          className="opacity-0 absolute inset-0 cursor-pointer w-full h-full"
+                        <span
+                          className="w-2 h-2 rounded-full shrink-0 shadow-xs"
+                          style={{ backgroundColor: glowCol }}
                         />
-                      </label>
-                    </div>
+                        <span className="font-semibold">#{univ.replace(/^#/, '')}</span>
+                        <button
+                          type="button"
+                          id={`btn-remove-universe-${univ.toLowerCase().replace(/[^a-z0-9]/g, '-')}`}
+                          aria-label={`Remove ${univ}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRemoveUniverseTag(univ);
+                          }}
+                          className="ml-0.5 p-0.5 rounded-md hover:bg-black/10 dark:hover:bg-white/20 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition-colors cursor-pointer"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    );
+                  })}
+
+                  {/* Text Input */}
+                  <div className="flex-1 min-w-[140px] flex items-center gap-1.5">
+                    <Search className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500 shrink-0 ml-0.5" />
+                    <input
+                      id="input-universe-search"
+                      type="text"
+                      value={universeSearchInput}
+                      onChange={(e) => {
+                        setUniverseSearchInput(e.target.value);
+                        setIsUniverseDropdownOpen(true);
+                      }}
+                      onFocus={() => setIsUniverseDropdownOpen(true)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ',') {
+                          e.preventDefault();
+                          const trimmed = universeSearchInput.trim().replace(/^#/, '');
+                          if (trimmed) {
+                            const match = filteredUniverseSuggestions.find(
+                              (s) => s.toLowerCase() === trimmed.toLowerCase()
+                            );
+                            handleAddUniverseTag(match || trimmed);
+                          }
+                        } else if (e.key === 'Escape') {
+                          setIsUniverseDropdownOpen(false);
+                        } else if (e.key === 'Backspace' && !universeSearchInput && selectedUniverses.length > 0) {
+                          handleRemoveUniverseTag(selectedUniverses[selectedUniverses.length - 1]);
+                        }
+                      }}
+                      placeholder={
+                        selectedUniverses.length === 0
+                          ? 'Search universes or type custom #universe...'
+                          : 'Add another universe tag...'
+                      }
+                      className="w-full bg-transparent text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none"
+                    />
                   </div>
                 </div>
-              )}
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {displayClusters.map((c) => {
-                  const theme = getClusterTheme(c);
-                  const isSelected = selectedUniverses.includes(c);
-                  return (
-                    <button
-                      key={c}
-                      type="button"
-                      id={`cluster-opt-${c.toLowerCase().replace(/[^a-z0-9]/g, '-')}`}
-                      onClick={() => toggleUniverse(c)}
-                      className={`flex items-center justify-between gap-2 p-2.5 rounded-xl text-xs font-medium text-left border transition-all cursor-pointer backdrop-blur-md ${
-                        isSelected
-                          ? `${theme.bgBadge} ${theme.borderColor} ring-1 ring-amber-400/40 font-semibold shadow-xs text-slate-900 dark:text-white`
-                          : 'bg-slate-50/80 dark:bg-white/[0.04] text-slate-700 dark:text-slate-300 border-slate-200 dark:border-white/10 hover:border-slate-300 dark:hover:border-white/20 hover:text-slate-900 dark:hover:text-white'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="w-2 h-2 rounded-full shrink-0 shadow-xs" style={{ backgroundColor: theme.color, color: theme.color }} />
-                        <span className="truncate">{c}</span>
-                      </div>
-                      {isSelected && (
-                        <span className="w-4 h-4 rounded-full bg-amber-500/20 border border-amber-400/60 flex items-center justify-center shrink-0">
-                          <Check className="w-2.5 h-2.5 text-amber-700 dark:text-amber-300" />
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-
-                {!isCreatingCustomCluster && (
-                  <button
-                    type="button"
-                    id="btn-add-custom-universe-pill"
-                    onClick={() => setIsCreatingCustomCluster(true)}
-                    className="flex items-center justify-center gap-1.5 p-2.5 rounded-xl text-xs font-medium text-amber-700 dark:text-amber-300/90 hover:text-amber-900 dark:hover:text-amber-200 border border-dashed border-amber-400/40 hover:border-amber-400/70 bg-amber-500/5 hover:bg-amber-500/10 transition-all cursor-pointer backdrop-blur-md"
+                {/* Autocomplete Dropdown */}
+                {isUniverseDropdownOpen && (
+                  <div
+                    id="universe-autocomplete-dropdown"
+                    className="absolute left-0 right-0 top-full mt-1.5 z-50 max-h-56 overflow-y-auto bg-white/95 dark:bg-[#071126]/95 border border-slate-200 dark:border-white/15 rounded-xl shadow-xl backdrop-blur-xl custom-scrollbar p-1.5 animate-in fade-in slide-in-from-top-2 duration-150"
                   >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span className="truncate">New Universe</span>
-                  </button>
+                    {/* "+ Add '#[typed_text]'" button when typing a term that doesn't match an existing universe */}
+                    {universeSearchInput.trim() && !isExactMatch && (
+                      <button
+                        type="button"
+                        id="btn-add-typed-universe-tag"
+                        onClick={() => handleAddUniverseTag(universeSearchInput)}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-amber-800 dark:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 dark:bg-amber-400/10 dark:hover:bg-amber-400/20 rounded-lg text-left transition-colors cursor-pointer border border-amber-400/30 mb-1"
+                      >
+                        <Plus className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate">
+                          + Add <span className="font-bold underline">#{universeSearchInput.trim().replace(/^#/, '')}</span>
+                        </span>
+                      </button>
+                    )}
+
+                    {/* Suggestions list */}
+                    {filteredUniverseSuggestions.length > 0 ? (
+                      <div className="flex flex-col gap-0.5">
+                        {filteredUniverseSuggestions.map((name) => {
+                          const theme = getClusterTheme(name);
+                          const color = theme?.color || getDynamicUniverseColor(name);
+                          return (
+                            <button
+                              key={name}
+                              type="button"
+                              id={`universe-suggest-${name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`}
+                              onClick={() => handleAddUniverseTag(name)}
+                              className="w-full flex items-center justify-between px-3 py-2 text-xs rounded-lg text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 hover:text-slate-950 dark:hover:text-white transition-colors text-left cursor-pointer group"
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <span
+                                  className="w-2.5 h-2.5 rounded-full shrink-0 shadow-xs"
+                                  style={{ backgroundColor: color }}
+                                />
+                                <span className="font-medium truncate group-hover:text-amber-600 dark:group-hover:text-amber-300 transition-colors">
+                                  #{name.replace(/^#/, '')}
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300 shrink-0">
+                                Select
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      !universeSearchInput.trim() ? (
+                        <div className="px-3 py-2.5 text-center text-xs text-slate-400">
+                          Type to search or create a new universe tag
+                        </div>
+                      ) : isExactMatch ? (
+                        <div className="px-3 py-2 text-center text-xs text-slate-400">
+                          Universe already tagged
+                        </div>
+                      ) : null
+                    )}
+                  </div>
                 )}
               </div>
             </div>
@@ -1405,11 +1465,7 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
                   rows={4}
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
-                  placeholder={
-                    cluster === 'Late Night Poetry'
-                      ? '"We are just echoes catching up with ancient fire..."'
-                      : 'Describe your mathematical formulation, shader algorithm, or cosmic idea...'
-                  }
+                  placeholder="Describe your star..."
                   className={`w-full bg-slate-50 dark:bg-black/40 border border-slate-300 dark:border-white/10 text-slate-900 dark:text-white text-sm p-4 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400/40 placeholder-slate-400 custom-scrollbar font-normal transition-all ${getFontFamilyClass(
                     fontFamily
                   )}`}
