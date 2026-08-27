@@ -836,6 +836,8 @@ export default function App() {
         )}
 
         <LandingAuth onAuthSuccess={handleAuthSuccess} />
+        {/* Interactive Starlight Galaxy Cursor Trail */}
+        <GalaxyCursorTrail />
       </div>
     );
   }
