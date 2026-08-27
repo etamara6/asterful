@@ -11,55 +11,55 @@ export const CUSTOM_FONTS: FontOption[] = [
   {
     id: 'default',
     name: 'Modern Sans (Plus Jakarta)',
-    fontFamily: '"Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif',
+    fontFamily: 'inherit',
     className: '',
     category: 'sans',
     sampleText: 'Cosmic Starlight & Celestial Thoughts',
   },
   {
-    id: 'bentos',
+    id: 'Bentos Script',
     name: 'Bentos Script',
-    fontFamily: '"Bentos Script", "Caveat", cursive, sans-serif',
+    fontFamily: 'Bentos Script',
     className: 'font-bentos',
     category: 'script',
     sampleText: 'Bentos Script — expressive handwritten wonder',
   },
   {
-    id: 'flywheel',
+    id: 'Flywheel',
     name: 'Flywheel',
-    fontFamily: '"Flywheel", "Pacifico", cursive, sans-serif',
+    fontFamily: 'Flywheel',
     className: 'font-flywheel',
     category: 'script',
     sampleText: 'Flywheel — smooth cosmic curves & dancing baseline',
   },
   {
-    id: 'stars',
+    id: 'Stars',
     name: 'Stars',
-    fontFamily: '"Stars", "Cinzel Decorative", "Cinzel", Georgia, serif',
+    fontFamily: 'Stars',
     className: 'font-stars',
     category: 'decorative',
     sampleText: 'STARS — CELESTIAL MAJESTY & ANCIENT AURA',
   },
   {
-    id: 'daisy',
+    id: 'Daisy Script',
     name: 'Daisy Script',
-    fontFamily: '"Daisy Script", "Marck Script", cursive, sans-serif',
+    fontFamily: 'Daisy Script',
     className: 'font-daisy',
     category: 'script',
     sampleText: 'Daisy Script — delicate poetry & starlit whispers',
   },
   {
-    id: 'earwig',
+    id: 'Earwig Factory',
     name: 'Earwig Factory',
-    fontFamily: '"Earwig Factory", "Special Elite", monospace, sans-serif',
+    fontFamily: 'Earwig Factory',
     className: 'font-earwig',
     category: 'display',
     sampleText: 'Earwig Factory — bold interstellar collage signal',
   },
   {
-    id: 'glamorous',
+    id: 'Glamorous',
     name: 'Glamorous',
-    fontFamily: '"Glamorous", "Great Vibes", "Playfair Display", cursive, serif',
+    fontFamily: 'Glamorous',
     className: 'font-glamorous',
     category: 'script',
     sampleText: 'Glamorous — radiant luxury & elegant calligraphy',
@@ -70,26 +70,33 @@ export const CUSTOM_FONTS: FontOption[] = [
  * Returns the CSS utility class corresponding to a font ID or family name.
  */
 export function getFontFamilyClass(fontFamilyOrId?: string): string {
-  if (!fontFamilyOrId || fontFamilyOrId === 'default') return '';
+  if (!fontFamilyOrId || fontFamilyOrId === 'default' || fontFamilyOrId === 'inherit') return '';
+  const normalized = fontFamilyOrId.trim().toLowerCase();
   const found = CUSTOM_FONTS.find(
     (f) =>
-      f.id === fontFamilyOrId ||
-      f.name.toLowerCase() === fontFamilyOrId.toLowerCase() ||
-      f.fontFamily === fontFamilyOrId
+      f.id.toLowerCase() === normalized ||
+      f.name.toLowerCase() === normalized ||
+      f.fontFamily.toLowerCase() === normalized
   );
   return found ? found.className : '';
 }
 
 /**
- * Returns the CSS font-family string value for inline styling if needed.
+ * Returns the CSS font-family string value for inline styling with fallbacks.
  */
-export function getFontFamilyStyle(fontFamilyOrId?: string): string | undefined {
-  if (!fontFamilyOrId || fontFamilyOrId === 'default') return undefined;
+export function getFontFamilyStyle(fontFamilyOrId?: string): string {
+  if (!fontFamilyOrId || fontFamilyOrId === 'default' || fontFamilyOrId === 'inherit') {
+    return 'inherit';
+  }
+  const normalized = fontFamilyOrId.trim();
+  // Check if it's one of our defined custom fonts
   const found = CUSTOM_FONTS.find(
     (f) =>
-      f.id === fontFamilyOrId ||
-      f.name.toLowerCase() === fontFamilyOrId.toLowerCase() ||
-      f.fontFamily === fontFamilyOrId
+      f.id.toLowerCase() === normalized.toLowerCase() ||
+      f.name.toLowerCase() === normalized.toLowerCase() ||
+      f.fontFamily.toLowerCase() === normalized.toLowerCase()
   );
-  return found ? found.fontFamily : undefined;
+  const targetFamily = found && found.id !== 'default' ? found.fontFamily : normalized;
+  return `'${targetFamily}', cursive, sans-serif`;
 }
+

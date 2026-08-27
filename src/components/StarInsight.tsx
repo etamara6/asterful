@@ -368,7 +368,7 @@ export const StarInsight: React.FC<StarInsightProps> = ({
               glowColor,
               0.04
             )}`,
-            fontFamily: getFontFamilyStyle(star.fontFamily),
+            fontFamily: star.fontFamily ? `'${star.fontFamily}', cursive, sans-serif` : 'inherit',
           }}
         >
           {star.isNsfw && !revealedNsfw ? (
@@ -384,7 +384,10 @@ export const StarInsight: React.FC<StarInsightProps> = ({
               </button>
             </div>
           ) : (
-            <div className={`leading-relaxed ${getFontFamilyClass(star.fontFamily)}`} style={{ fontFamily: getFontFamilyStyle(star.fontFamily) }}>
+            <div
+              className={`leading-relaxed ${getFontFamilyClass(star.fontFamily)}`}
+              style={{ fontFamily: star.fontFamily ? `'${star.fontFamily}', cursive, sans-serif` : 'inherit' }}
+            >
               <FormattedText text={star.content} onTagClick={onTagClick} />
             </div>
           )}

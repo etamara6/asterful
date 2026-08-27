@@ -1431,10 +1431,16 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
                     id="star-font-family-select"
                     value={fontFamily}
                     onChange={(e) => setFontFamily(e.target.value)}
+                    style={{ fontFamily: fontFamily && fontFamily !== 'default' ? `'${fontFamily}', cursive, sans-serif` : 'inherit' }}
                     className="px-2 py-1 rounded-lg text-xs font-semibold bg-white dark:bg-slate-900 border border-slate-300 dark:border-purple-500/40 text-slate-900 dark:text-amber-200 focus:outline-none focus:ring-2 focus:ring-amber-400/50 cursor-pointer shadow-xs"
                   >
                     {CUSTOM_FONTS.map((f) => (
-                      <option key={f.id} value={f.id} className="text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-900 py-1">
+                      <option
+                        key={f.id}
+                        value={f.id}
+                        style={{ fontFamily: f.id !== 'default' ? `'${f.fontFamily}', cursive, sans-serif` : 'inherit' }}
+                        className="text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-900 py-1"
+                      >
                         {f.name} {f.id !== 'default' ? '🔤' : ''}
                       </option>
                     ))}
@@ -1448,7 +1454,7 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
                   className={`w-full min-h-[110px] p-4 rounded-xl bg-slate-50/90 dark:bg-black/50 border border-amber-400/40 text-slate-900 dark:text-white text-sm custom-scrollbar overflow-y-auto max-h-48 leading-relaxed shadow-inner ${getFontFamilyClass(
                     fontFamily
                   )}`}
-                  style={{ fontFamily: getFontFamilyStyle(fontFamily) }}
+                  style={{ fontFamily: fontFamily && fontFamily !== 'default' ? `'${fontFamily}', cursive, sans-serif` : 'inherit' }}
                 >
                   {content.trim() ? (
                     <FormattedText text={content} />
@@ -1469,7 +1475,7 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
                   className={`w-full bg-slate-50 dark:bg-black/40 border border-slate-300 dark:border-white/10 text-slate-900 dark:text-white text-sm p-4 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400/40 placeholder-slate-400 custom-scrollbar font-normal transition-all ${getFontFamilyClass(
                     fontFamily
                   )}`}
-                  style={{ fontFamily: getFontFamilyStyle(fontFamily) }}
+                  style={{ fontFamily: fontFamily && fontFamily !== 'default' ? `'${fontFamily}', cursive, sans-serif` : 'inherit' }}
                   required
                 />
               )}
