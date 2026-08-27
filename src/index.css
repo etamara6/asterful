@@ -5,7 +5,7 @@
    ═══════════════════════════════════════════════════════════════ */
 @font-face {
   font-family: 'Bentos Script';
-  src: url('/fonts/bentos-script.ttf') format('truetype');
+  src: url('/fonts/bentos-script.otf') format('opentype');
   font-weight: normal;
   font-style: normal;
   font-display: swap;
@@ -13,15 +13,8 @@
 
 @font-face {
   font-family: 'Flywheel';
-  src: url('/fonts/flywheel.ttf') format('truetype');
-  font-weight: normal;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Stars';
-  src: url('/fonts/stars.ttf') format('truetype');
+  src: url('/fonts/flywheel.otf') format('opentype'),
+       url('/fonts/flywheel.ttf') format('truetype');
   font-weight: normal;
   font-style: normal;
   font-display: swap;
@@ -37,7 +30,8 @@
 
 @font-face {
   font-family: 'Earwig Factory';
-  src: url('/fonts/earwig-factory.ttf') format('truetype');
+  src: url('/fonts/earwig-factory.otf') format('opentype'),
+       url('/fonts/earwig-factory.ttf') format('truetype');
   font-weight: normal;
   font-style: normal;
   font-display: swap;
@@ -45,7 +39,7 @@
 
 @font-face {
   font-family: 'Glamorous';
-  src: url('/fonts/glamorous-trial.ttf') format('truetype');
+  src: url('/fonts/glamorous.otf') format('opentype');
   font-weight: normal;
   font-style: normal;
   font-display: swap;
