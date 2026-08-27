@@ -92,131 +92,53 @@ export const SearchModal: React.FC<SearchModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
-  // 1. SOURCED USERS
+  // 1. SOURCED USERS (Strictly dynamic with empty fallback)
   const allUsers = useMemo(() => {
+    try {
+      const stored = localStorage.getItem('asterful_registered_users') || localStorage.getItem('asterful_users');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          return parsed;
+        }
+      }
+    } catch {
+      // ignore
+    }
     return getAllRegisteredUsers();
   }, [isOpen, currentUser]);
 
-  // 2. SOURCED UNIVERSES
+  // 2. SOURCED UNIVERSES (Strictly dynamic from custom universes and actual stars)
   const allUniverses: UniverseItem[] = useMemo(() => {
-    const clusterMap: Record<StarCluster, { stars: StarNode[]; authors: Set<string> }> = {
-      'Digital Art': { stars: [], authors: new Set() },
-      'Late Night Poetry': { stars: [], authors: new Set() },
-      'Tech Futures': { stars: [], authors: new Set() },
-      'Cosmic Philosophy': { stars: [], authors: new Set() },
-      'Cybernetics': { stars: [], authors: new Set() },
-      'Our Universe': { stars: [], authors: new Set() },
-    };
+    const list: UniverseItem[] = [];
 
-    let sharedStarsCount = 0;
-    const sharedAuthors = new Set<string>();
-    let privateStarsCount = 0;
-    const privateAuthors = new Set<string>();
-
-    stars.forEach((s) => {
-      if (clusterMap[s.cluster]) {
-        clusterMap[s.cluster].stars.push(s);
-        clusterMap[s.cluster].authors.add(s.author.handle || s.author.name);
-      }
-      if (s.allowedUserIds && s.allowedUserIds.length > 1) {
-        sharedStarsCount++;
-        sharedAuthors.add(s.author.handle || s.author.name);
-      }
-      if (s.visibility === 'private' || (s.allowedUserIds && s.allowedUserIds.length <= 1)) {
-        privateStarsCount++;
-        privateAuthors.add(s.author.handle || s.author.name);
-      }
-    });
-
-    const list: UniverseItem[] = [
-      {
-        id: 'univ-digital-art',
-        name: 'Digital Art Universe',
-        clusterKey: 'Digital Art',
-        description: 'Volumetric shaders, GLSL raymarching, and generative algorithmic forms.',
-        memberCount: Math.max(clusterMap['Digital Art'].authors.size, 6),
-        starCount: clusterMap['Digital Art'].stars.length,
-        glowColor: '#FFD700',
-      },
-      {
-        id: 'univ-poetry',
-        name: 'Late Night Poetry Constellation',
-        clusterKey: 'Late Night Poetry',
-        description: 'Nocturnal verses, lunar reflections, and starlight echoes across deep space.',
-        memberCount: Math.max(clusterMap['Late Night Poetry'].authors.size, 8),
-        starCount: clusterMap['Late Night Poetry'].stars.length,
-        glowColor: '#FF70A6',
-      },
-      {
-        id: 'univ-tech',
-        name: 'Tech Futures Sphere',
-        clusterKey: 'Tech Futures',
-        description: 'Dyson swarms, warp metrics, decentralized protocols, and silicon nomads.',
-        memberCount: Math.max(clusterMap['Tech Futures'].authors.size, 5),
-        starCount: clusterMap['Tech Futures'].stars.length,
-        glowColor: '#3A86FF',
-      },
-      {
-        id: 'univ-philosophy',
-        name: 'Cosmic Philosophy Nexus',
-        clusterKey: 'Cosmic Philosophy',
-        description: 'Fermi paradox, conscious recursion, entropy, and existential inquiries.',
-        memberCount: Math.max(clusterMap['Cosmic Philosophy'].authors.size, 4),
-        starCount: clusterMap['Cosmic Philosophy'].stars.length,
-        glowColor: '#06D6A0',
-      },
-      {
-        id: 'univ-cybernetics',
-        name: 'Cybernetics Core',
-        clusterKey: 'Cybernetics',
-        description: 'Synthetic neural interfaces, organoid computing, and quantum loops.',
-        memberCount: Math.max(clusterMap['Cybernetics'].authors.size, 5),
-        starCount: clusterMap['Cybernetics'].stars.length,
-        glowColor: '#8338EC',
-      },
-      {
-        id: 'univ-shared',
-        name: 'Our Universe (Shared Sanctuary)',
-        description: 'Private collaborative constellations illuminated among followed stargazers.',
-        isSharedSpace: true,
-        memberCount: Math.max(sharedAuthors.size, 3),
-        starCount: sharedStarsCount,
-        glowColor: '#3A86FF',
-      },
-      {
-        id: 'univ-private',
-        name: 'Private Vaults & Personal Constellations',
-        description: 'Exclusive cosmic nodes visible only to their respective creators.',
-        isPrivateSpace: true,
-        memberCount: Math.max(privateAuthors.size, 1),
-        starCount: privateStarsCount,
-        glowColor: '#8338EC',
-      },
-    ];
-
-    // Add user-created / shared custom universes
+    // Add user-created / stored custom universes from registry or localStorage
     try {
-      const storedUniverses = getStoredUniverses();
-      storedUniverses.forEach((u) => {
-        const uStars = stars.filter(
-          (s) =>
-            (s.universeName && s.universeName.toLowerCase() === u.name.toLowerCase()) ||
-            (s.universes && s.universes.some((un) => un && un.toLowerCase() === u.name.toLowerCase()))
-        );
-        list.push({
-          id: u.id,
-          name: `🪐 ${u.name}`,
-          clusterKey: u.name as any,
-          description: u.description || (u.isPrivate
-            ? 'Private custom universe created by stargazer.'
-            : 'Collaborative shared universe with custom orbit.'),
-          isSharedSpace: !u.isPrivate,
-          isPrivateSpace: u.isPrivate,
-          memberCount: Math.max(u.memberIds?.length || 1, 1),
-          starCount: uStars.length,
-          glowColor: u.glowColor || getDefaultUniverseGlow(u.name),
+      const rawStored = localStorage.getItem('constellation_universes_v1') || localStorage.getItem('asterful_universes');
+      const storedUniverses = rawStored ? JSON.parse(rawStored) : getStoredUniverses();
+      if (Array.isArray(storedUniverses)) {
+        storedUniverses.forEach((u: any) => {
+          if (!u || !u.name) return;
+          const uStars = stars.filter(
+            (s) =>
+              (s.universeName && s.universeName.toLowerCase() === u.name.toLowerCase()) ||
+              (s.universes && s.universes.some((un) => un && un.toLowerCase() === u.name.toLowerCase()))
+          );
+          list.push({
+            id: u.id || `univ-${u.name}`,
+            name: `🪐 ${u.name}`,
+            clusterKey: u.name as any,
+            description: u.description || (u.isPrivate
+              ? 'Private custom universe created by stargazer.'
+              : 'Collaborative shared universe with custom orbit.'),
+            isSharedSpace: !u.isPrivate,
+            isPrivateSpace: u.isPrivate,
+            memberCount: Math.max(u.memberIds?.length || 1, 1),
+            starCount: uStars.length,
+            glowColor: u.glowColor || getDefaultUniverseGlow(u.name),
+          });
         });
-      });
+      }
     } catch {
       // ignore
     }
@@ -533,7 +455,12 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                     />
                   ))
                 ) : (
-                  <EmptySearchResult query={query} onReset={() => setQuery('')} />
+                  <EmptySearchResult
+                    query={query}
+                    emptyTitle="No creators found yet"
+                    emptySubtitle={query ? `No creators found matching "${query}".` : 'No registered creators or explorers found in this sky yet.'}
+                    onReset={() => setQuery('')}
+                  />
                 )}
               </div>
             )}
@@ -560,7 +487,12 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                     ))}
                   </div>
                 ) : (
-                  <EmptySearchResult query={query} onReset={() => setQuery('')} />
+                  <EmptySearchResult
+                    query={query}
+                    emptyTitle="No universes created yet"
+                    emptySubtitle={query ? `No universes or constellations matching "${query}".` : 'No custom constellations or universes created yet. Create a star to ignite one.'}
+                    onReset={() => setQuery('')}
+                  />
                 )}
               </div>
             )}
@@ -852,14 +784,21 @@ const UniverseResultRow: React.FC<{
   );
 };
 
-const EmptySearchResult: React.FC<{ query: string; onReset: () => void }> = ({ query, onReset }) => (
+const EmptySearchResult: React.FC<{
+  query: string;
+  emptyTitle?: string;
+  emptySubtitle?: string;
+  onReset: () => void;
+}> = ({ query, emptyTitle, emptySubtitle, onReset }) => (
   <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
     <div className="w-14 h-14 rounded-full bg-amber-500/10 dark:bg-amber-400/10 border border-amber-400/30 dark:border-amber-300/30 flex items-center justify-center mb-3 text-amber-600 dark:text-amber-300 shadow-xs">
       <Search className="w-6 h-6" />
     </div>
-    <h4 className="text-sm font-bold text-slate-900 dark:text-slate-200 mb-1">No cosmic coordinates found</h4>
+    <h4 className="text-sm font-bold text-slate-900 dark:text-slate-200 mb-1">
+      {emptyTitle || 'No cosmic coordinates found'}
+    </h4>
     <p className="text-xs text-slate-600 dark:text-slate-400 max-w-sm mb-4">
-      {query ? `We couldn't find any stars, creators, or universes matching "${query}".` : 'Try searching for a topic, artist, or constellation.'}
+      {emptySubtitle || (query ? `We couldn't find any stars, creators, or universes matching "${query}".` : 'Try searching for a topic, artist, or constellation.')}
     </p>
     {query && (
       <button

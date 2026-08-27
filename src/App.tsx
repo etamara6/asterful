@@ -46,10 +46,10 @@ export default function App() {
 
   // One-time legacy localStorage cache clear check
   useEffect(() => {
-    const storageVersion = localStorage.getItem('asterful_purge_v3');
+    const storageVersion = localStorage.getItem('asterful_purge_v4');
     if (!storageVersion) {
       localStorage.clear();
-      localStorage.setItem('asterful_purge_v3', 'true');
+      localStorage.setItem('asterful_purge_v4', 'true');
     }
   }, []);
 
