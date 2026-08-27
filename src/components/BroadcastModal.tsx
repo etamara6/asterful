@@ -131,8 +131,14 @@ export const BroadcastModal: React.FC<BroadcastModalProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    let animationFrameId: number;
+    let animationFrameId: number = 0;
     let time = 0;
+    let isRunning = true;
+    let isIntersecting = true;
+
+    // 60 FPS Frame Rate Capping (1000ms / 60 = 16.66ms)
+    const FRAME_MIN_TIME = 1000 / 60;
+    let lastRenderTime = performance.now();
 
     let width = 600;
     let height = 400;
@@ -157,7 +163,19 @@ export const BroadcastModal: React.FC<BroadcastModalProps> = ({
     updateDimensions();
     window.addEventListener('resize', updateDimensions, { passive: true });
 
-    const render = () => {
+    const render = (now: number) => {
+      if (!isRunning || document.hidden || !isIntersecting) {
+        animationFrameId = 0;
+        return;
+      }
+
+      const elapsed = now - lastRenderTime;
+      if (elapsed < FRAME_MIN_TIME) {
+        animationFrameId = requestAnimationFrame(render);
+        return;
+      }
+      lastRenderTime = now - (elapsed % FRAME_MIN_TIME);
+
       time += 0.03;
 
       // Deep space backdrop
@@ -224,13 +242,61 @@ export const BroadcastModal: React.FC<BroadcastModalProps> = ({
         ctx.fill();
       }
 
-      animationFrameId = requestAnimationFrame(render);
+      if (isRunning && !document.hidden && isIntersecting) {
+        animationFrameId = requestAnimationFrame(render);
+      }
     };
 
-    render();
+    // IntersectionObserver to pause rendering when canvas is scrolled out of viewport
+    let observer: IntersectionObserver | null = null;
+    if (typeof IntersectionObserver !== 'undefined' && canvas) {
+      observer = new IntersectionObserver(
+        (entries) => {
+          const entry = entries[0];
+          isIntersecting = entry ? entry.isIntersecting : true;
+          if (isIntersecting && !document.hidden && isRunning && !animationFrameId) {
+            lastRenderTime = performance.now();
+            animationFrameId = requestAnimationFrame(render);
+          }
+        },
+        { threshold: 0.05 }
+      );
+      observer.observe(canvas);
+    }
+
+    // Tab Visibility Handler to pause animation when tab is inactive
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        if (animationFrameId) {
+          cancelAnimationFrame(animationFrameId);
+          animationFrameId = 0;
+        }
+      } else {
+        if (isRunning && isIntersecting && !animationFrameId) {
+          lastRenderTime = performance.now();
+          animationFrameId = requestAnimationFrame(render);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    if (!document.hidden && isIntersecting) {
+      lastRenderTime = performance.now();
+      animationFrameId = requestAnimationFrame(render);
+    }
+
     return () => {
+      isRunning = false;
       window.removeEventListener('resize', updateDimensions);
-      cancelAnimationFrame(animationFrameId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (observer) {
+        observer.disconnect();
+      }
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = 0;
+      }
     };
   }, [isOpen, isGoLiveMode, activeBroadcast]);
 

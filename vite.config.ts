@@ -20,6 +20,14 @@ export default defineConfig(() => {
           drop_debugger: true,
         },
       },
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            vendor: ['react', 'react-dom'],
+            icons: ['lucide-react'],
+          },
+        },
+      },
     },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.

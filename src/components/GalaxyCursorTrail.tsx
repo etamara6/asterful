@@ -123,6 +123,12 @@ export const GalaxyCursorTrail: React.FC = () => {
       }
 
       lastPosRef.current = { x: currentX, y: currentY };
+
+      // Ensure animation loop is actively running if sleeping
+      if (!animFrameId && isRunning && !document.hidden && isIntersecting) {
+        lastRenderTime = performance.now();
+        animFrameId = requestAnimationFrame(render);
+      }
     };
 
     // Native pointer / mouse listeners
@@ -194,17 +200,38 @@ export const GalaxyCursorTrail: React.FC = () => {
       context.fill();
     };
 
+    // 60 FPS Frame Rate Capping (1000ms / 60 = 16.66ms)
+    const FRAME_MIN_TIME = 1000 / 60;
+    let lastRenderTime = performance.now();
+    let isIntersecting = true;
+
     // Continuous requestAnimationFrame render loop
-    const render = () => {
-      if (!isRunning) return;
+    const render = (now: number) => {
+      if (!isRunning || document.hidden || !isIntersecting) {
+        animFrameId = 0;
+        return;
+      }
+
+      const elapsed = now - lastRenderTime;
+      if (elapsed < FRAME_MIN_TIME) {
+        animFrameId = requestAnimationFrame(render);
+        return;
+      }
+      lastRenderTime = now - (elapsed % FRAME_MIN_TIME);
 
       const width = window.innerWidth;
       const height = window.innerHeight;
 
-      // Clear the canvas on each frame without triggering any React lifecycle hooks
-      ctx.clearRect(0, 0, width, height);
-
       const particles = particlesRef.current;
+      if (particles.length === 0) {
+        // Clear canvas and go to sleep when no active particles
+        ctx.clearRect(0, 0, width, height);
+        animFrameId = 0;
+        return;
+      }
+
+      // Clear the canvas on each active frame
+      ctx.clearRect(0, 0, width, height);
       
       // In-place reverse loop update & draw for high efficiency
       for (let i = particles.length - 1; i >= 0; i--) {
@@ -266,10 +293,46 @@ export const GalaxyCursorTrail: React.FC = () => {
         ctx.restore();
       }
 
-      animFrameId = requestAnimationFrame(render);
+      if (isRunning && !document.hidden && isIntersecting && particles.length > 0) {
+        animFrameId = requestAnimationFrame(render);
+      } else {
+        animFrameId = 0;
+      }
     };
 
-    animFrameId = requestAnimationFrame(render);
+    // IntersectionObserver to pause rendering when canvas is scrolled out of viewport
+    let observer: IntersectionObserver | null = null;
+    if (typeof IntersectionObserver !== 'undefined' && canvas) {
+      observer = new IntersectionObserver(
+        (entries) => {
+          const entry = entries[0];
+          isIntersecting = entry ? entry.isIntersecting : true;
+          if (isIntersecting && !document.hidden && isRunning && !animFrameId && particlesRef.current.length > 0) {
+            lastRenderTime = performance.now();
+            animFrameId = requestAnimationFrame(render);
+          }
+        },
+        { threshold: 0.05 }
+      );
+      observer.observe(canvas);
+    }
+
+    // Tab Visibility Handler to pause animation when tab is inactive
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        if (animFrameId) {
+          cancelAnimationFrame(animFrameId);
+          animFrameId = 0;
+        }
+      } else {
+        if (isRunning && isIntersecting && !animFrameId && particlesRef.current.length > 0) {
+          lastRenderTime = performance.now();
+          animFrameId = requestAnimationFrame(render);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       isRunning = false;
@@ -280,8 +343,13 @@ export const GalaxyCursorTrail: React.FC = () => {
       window.removeEventListener('pointerleave', handlePointerLeave);
       window.removeEventListener('pointerup', handlePointerLeave);
       document.removeEventListener('mouseleave', handlePointerLeave);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (observer) {
+        observer.disconnect();
+      }
       if (animFrameId) {
         cancelAnimationFrame(animFrameId);
+        animFrameId = 0;
       }
     };
   }, []);

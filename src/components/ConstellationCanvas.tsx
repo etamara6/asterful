@@ -239,6 +239,11 @@ export const ConstellationCanvas: React.FC<ConstellationCanvasProps> = ({
     if (!ctx) return;
 
     let isRunning = true;
+    let isIntersecting = true;
+
+    // 60 FPS Frame Rate Capping (1000ms / 60 = 16.66ms)
+    const FRAME_MIN_TIME = 1000 / 60;
+    let lastRenderTime = performance.now();
 
     // Cache layout dimensions on resize/init to decouple from animation loop
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -264,7 +269,18 @@ export const ConstellationCanvas: React.FC<ConstellationCanvasProps> = ({
     const universeList = getStoredUniverses();
 
     const render = (now: number) => {
-      if (!isRunning) return;
+      if (!isRunning || document.hidden || !isIntersecting) {
+        animationFrameIdRef.current = 0;
+        return;
+      }
+
+      // Delta time check to cap to 60 FPS on 120Hz/144Hz displays
+      const elapsed = now - lastRenderTime;
+      if (elapsed < FRAME_MIN_TIME) {
+        animationFrameIdRef.current = requestAnimationFrame(render);
+        return;
+      }
+      lastRenderTime = now - (elapsed % FRAME_MIN_TIME);
 
       const dt = Math.min(now - lastTimeRef.current, 64);
       lastTimeRef.current = now;
@@ -892,15 +908,62 @@ export const ConstellationCanvas: React.FC<ConstellationCanvasProps> = ({
       }
 
       ctx.restore(); // Restore devicePixelRatio
-      animationFrameIdRef.current = requestAnimationFrame(render);
+      if (isRunning && !document.hidden && isIntersecting) {
+        animationFrameIdRef.current = requestAnimationFrame(render);
+      }
     };
 
-    animationFrameIdRef.current = requestAnimationFrame(render);
+    // IntersectionObserver to pause rendering when canvas is scrolled out of viewport
+    let observer: IntersectionObserver | null = null;
+    if (typeof IntersectionObserver !== 'undefined' && canvas) {
+      observer = new IntersectionObserver(
+        (entries) => {
+          const entry = entries[0];
+          isIntersecting = entry ? entry.isIntersecting : true;
+          if (isIntersecting && !document.hidden && isRunning && !animationFrameIdRef.current) {
+            lastTimeRef.current = performance.now();
+            lastRenderTime = performance.now();
+            animationFrameIdRef.current = requestAnimationFrame(render);
+          }
+        },
+        { threshold: 0.05 }
+      );
+      observer.observe(canvas);
+    }
+
+    // Tab Visibility Handler to pause animation when tab is inactive
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        if (animationFrameIdRef.current) {
+          cancelAnimationFrame(animationFrameIdRef.current);
+          animationFrameIdRef.current = 0;
+        }
+      } else {
+        if (isRunning && isIntersecting && !animationFrameIdRef.current) {
+          lastTimeRef.current = performance.now();
+          lastRenderTime = performance.now();
+          animationFrameIdRef.current = requestAnimationFrame(render);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    if (!document.hidden && isIntersecting) {
+      animationFrameIdRef.current = requestAnimationFrame(render);
+    }
 
     return () => {
       isRunning = false;
       window.removeEventListener('resize', updateCanvasDimensions);
-      cancelAnimationFrame(animationFrameIdRef.current);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (observer) {
+        observer.disconnect();
+      }
+      if (animationFrameIdRef.current) {
+        cancelAnimationFrame(animationFrameIdRef.current);
+        animationFrameIdRef.current = 0;
+      }
     };
   }, [
     stars,

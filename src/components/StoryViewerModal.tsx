@@ -133,9 +133,23 @@ export const StoryViewerModal: React.FC<StoryViewerModalProps> = ({
       return;
     }
 
-    let animationId: number;
+    let animationId: number = 0;
+    const FRAME_MIN_TIME = 1000 / 60;
+    let lastTickTime = performance.now();
 
     const tick = (timestamp: number) => {
+      if (document.hidden) {
+        animationId = requestAnimationFrame(tick);
+        return;
+      }
+
+      const delta = timestamp - lastTickTime;
+      if (delta < FRAME_MIN_TIME) {
+        animationId = requestAnimationFrame(tick);
+        return;
+      }
+      lastTickTime = timestamp - (delta % FRAME_MIN_TIME);
+
       if (!startTimeRef.current) {
         startTimeRef.current = timestamp - (pausedAtRef.current || 0);
       }
@@ -155,7 +169,9 @@ export const StoryViewerModal: React.FC<StoryViewerModalProps> = ({
     animationFrameRef.current = animationId;
 
     return () => {
-      cancelAnimationFrame(animationId);
+      if (animationId) {
+        cancelAnimationFrame(animationId);
+      }
     };
   }, [isOpen, isPaused, showViewersModal, confirmDeleteId, currentStory, storyIndex, authorIndex, goToNextStory]);
 
