@@ -240,6 +240,29 @@ export const ConstellationCanvas: React.FC<ConstellationCanvasProps> = ({
 
     let isRunning = true;
 
+    // Cache layout dimensions on resize/init to decouple from animation loop
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    let cachedWidth = 2000;
+    let cachedHeight = 2000;
+
+    const updateCanvasDimensions = () => {
+      if (!canvas) return;
+      cachedWidth = canvas.clientWidth || 2000;
+      cachedHeight = canvas.clientHeight || 2000;
+      const targetW = Math.floor(cachedWidth * dpr);
+      const targetH = Math.floor(cachedHeight * dpr);
+      if (canvas.width !== targetW || canvas.height !== targetH) {
+        canvas.width = targetW;
+        canvas.height = targetH;
+      }
+    };
+
+    updateCanvasDimensions();
+    window.addEventListener('resize', updateCanvasDimensions, { passive: true });
+
+    // Cache stored universes outside per-frame loop to prevent storage parsing overhead
+    const universeList = getStoredUniverses();
+
     const render = (now: number) => {
       if (!isRunning) return;
 
@@ -255,15 +278,8 @@ export const ConstellationCanvas: React.FC<ConstellationCanvasProps> = ({
         Math.min(dt / 16, 1.8)
       );
 
-      // Handle Retina DPI scaling
-      const dpr = window.devicePixelRatio || 1;
-      const width = canvas.clientWidth;
-      const height = canvas.clientHeight;
-
-      if (canvas.width !== width * dpr || canvas.height !== height * dpr) {
-        canvas.width = width * dpr;
-        canvas.height = height * dpr;
-      }
+      const width = cachedWidth;
+      const height = cachedHeight;
 
       ctx.save();
       ctx.scale(dpr, dpr);
@@ -579,7 +595,6 @@ export const ConstellationCanvas: React.FC<ConstellationCanvasProps> = ({
 
       // 5. Render Celestial Star Nodes
       const hoveredId = hoveredStarIdRef.current;
-      const universeList = getStoredUniverses();
 
       for (let i = 0; i < stars.length; i++) {
         const star = stars[i];
@@ -884,6 +899,7 @@ export const ConstellationCanvas: React.FC<ConstellationCanvasProps> = ({
 
     return () => {
       isRunning = false;
+      window.removeEventListener('resize', updateCanvasDimensions);
       cancelAnimationFrame(animationFrameIdRef.current);
     };
   }, [

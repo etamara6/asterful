@@ -43,10 +43,10 @@ export const GalaxyCursorTrail: React.FC = () => {
     let animFrameId = 0;
     let isRunning = true;
 
-    // Retina Display & High DPI Scaling
+    // Retina Display & High DPI Scaling (capped at 2 for performance on live deployments)
     const resizeCanvas = () => {
       if (!canvas || !ctx) return;
-      const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
       const width = window.innerWidth;
       const height = window.innerHeight;
 

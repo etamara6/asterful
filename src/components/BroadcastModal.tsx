@@ -134,10 +134,31 @@ export const BroadcastModal: React.FC<BroadcastModalProps> = ({
     let animationFrameId: number;
     let time = 0;
 
+    let width = 600;
+    let height = 400;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+    const updateDimensions = () => {
+      if (!canvas || !canvas.parentElement) return;
+      width = canvas.parentElement.clientWidth || 600;
+      height = canvas.parentElement.clientHeight || 400;
+      canvas.width = Math.floor(width * dpr);
+      canvas.height = Math.floor(height * dpr);
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      if (typeof ctx.resetTransform === 'function') {
+        ctx.resetTransform();
+      } else {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+      }
+      ctx.scale(dpr, dpr);
+    };
+
+    updateDimensions();
+    window.addEventListener('resize', updateDimensions, { passive: true });
+
     const render = () => {
       time += 0.03;
-      const width = (canvas.width = canvas.parentElement?.clientWidth || 600);
-      const height = (canvas.height = canvas.parentElement?.clientHeight || 400);
 
       // Deep space backdrop
       const grad = ctx.createLinearGradient(0, 0, width, height);
@@ -207,7 +228,10 @@ export const BroadcastModal: React.FC<BroadcastModalProps> = ({
     };
 
     render();
-    return () => cancelAnimationFrame(animationFrameId);
+    return () => {
+      window.removeEventListener('resize', updateDimensions);
+      cancelAnimationFrame(animationFrameId);
+    };
   }, [isOpen, isGoLiveMode, activeBroadcast]);
 
   if (!isOpen) return null;
