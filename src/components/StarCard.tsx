@@ -555,7 +555,7 @@ export const StarCard: React.FC<StarCardProps> = ({
           className={`text-xs text-slate-600 dark:text-slate-300 line-clamp-2 leading-relaxed mb-3 ${getFontFamilyClass(
             star.fontFamily
           )}`}
-          style={{ fontFamily: star.fontFamily ? `'${star.fontFamily}', cursive, sans-serif` : 'inherit' }}
+          style={{ fontFamily: getFontFamilyStyle(star.fontFamily) }}
         >
           <HashtagText text={star.content} onTagClick={onTagClick} />
         </div>

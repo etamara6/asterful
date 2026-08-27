@@ -662,7 +662,7 @@ export const StarDetailDrawer: React.FC<StarDetailDrawerProps> = ({
                 ? 'bg-gradient-to-b from-pink-50 to-purple-50 dark:from-pink-950/20 dark:to-purple-950/20 border-pink-200 dark:border-pink-500/20 italic font-serif leading-relaxed text-pink-950 dark:text-pink-100/90 text-sm sm:text-base'
                 : 'bg-white dark:bg-white/[0.03] border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-200 text-sm leading-relaxed shadow-xs'
             } ${getFontFamilyClass(star.fontFamily)}`}
-            style={{ fontFamily: star.fontFamily ? `'${star.fontFamily}', cursive, sans-serif` : 'inherit' }}
+            style={{ fontFamily: getFontFamilyStyle(star.fontFamily) }}
           >
             {star.isNsfw && !revealedNsfw ? (
               <div className="py-2 text-center select-none">
@@ -682,7 +682,7 @@ export const StarDetailDrawer: React.FC<StarDetailDrawerProps> = ({
             ) : (
               <div
                 className={`leading-relaxed ${getFontFamilyClass(star.fontFamily)}`}
-                style={{ fontFamily: star.fontFamily ? `'${star.fontFamily}', cursive, sans-serif` : 'inherit' }}
+                style={{ fontFamily: getFontFamilyStyle(star.fontFamily) }}
               >
                 <HashtagText text={star.content} onTagClick={onTagClick} />
               </div>

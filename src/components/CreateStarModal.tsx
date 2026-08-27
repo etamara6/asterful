@@ -40,7 +40,8 @@ import {
   FileEdit,
   Type,
   Search,
-  Hash
+  Hash,
+  ChevronDown
 } from 'lucide-react';
 import { StarCluster, StarNode, StarVisibility, User, Universe, UnlitStarDraft, Galaxy } from '../types';
 import {
@@ -127,6 +128,8 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
   const universeSearchContainerRef = useRef<HTMLDivElement>(null);
   const [content, setContent] = useState('');
   const [fontFamily, setFontFamily] = useState<string>('default');
+  const [isFontDropdownOpen, setIsFontDropdownOpen] = useState(false);
+  const fontDropdownRef = useRef<HTMLDivElement>(null);
   const [tagInput, setTagInput] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [glowColor, setGlowColor] = useState('#FFD700');
@@ -217,7 +220,7 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
     return allStoredUniverses.filter((u) => u.isPrivate === isPrivate || !u.isPrivate);
   }, [allStoredUniverses, visibilityMode]);
 
-  // Close universe dropdown on outside click
+  // Close universe and font dropdowns on outside click
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (
@@ -225,6 +228,12 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
         !universeSearchContainerRef.current.contains(event.target as Node)
       ) {
         setIsUniverseDropdownOpen(false);
+      }
+      if (
+        fontDropdownRef.current &&
+        !fontDropdownRef.current.contains(event.target as Node)
+      ) {
+        setIsFontDropdownOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -1421,30 +1430,90 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
                   </div>
                 </div>
 
-                {/* Right: Font Type 🔤 Dropdown Select */}
-                <div className="flex items-center gap-1.5 ml-auto">
-                  <label htmlFor="star-font-family-select" className="text-[11px] font-medium text-slate-600 dark:text-slate-300 flex items-center gap-1 cursor-pointer">
-                    <Type className="w-3.5 h-3.5 text-amber-500" />
-                    <span className="hidden sm:inline">Font Type:</span>
-                  </label>
-                  <select
-                    id="star-font-family-select"
-                    value={fontFamily}
-                    onChange={(e) => setFontFamily(e.target.value)}
-                    style={{ fontFamily: fontFamily && fontFamily !== 'default' ? `'${fontFamily}', cursive, sans-serif` : 'inherit' }}
-                    className="px-2 py-1 rounded-lg text-xs font-semibold bg-white dark:bg-slate-900 border border-slate-300 dark:border-purple-500/40 text-slate-900 dark:text-amber-200 focus:outline-none focus:ring-2 focus:ring-amber-400/50 cursor-pointer shadow-xs"
-                  >
-                    {CUSTOM_FONTS.map((f) => (
-                      <option
-                        key={f.id}
-                        value={f.id}
-                        style={{ fontFamily: f.id !== 'default' ? `'${f.fontFamily}', cursive, sans-serif` : 'inherit' }}
-                        className="text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-900 py-1"
-                      >
-                        {f.name} {f.id !== 'default' ? '🔤' : ''}
-                      </option>
-                    ))}
-                  </select>
+                {/* Right: Custom UI Font Type 🔤 Dropdown Picker */}
+                <div ref={fontDropdownRef} className="relative ml-auto">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] font-medium text-slate-600 dark:text-slate-300 flex items-center gap-1">
+                      <Type className="w-3.5 h-3.5 text-amber-500" />
+                      <span className="hidden sm:inline">Font Type:</span>
+                    </span>
+                    <button
+                      type="button"
+                      id="star-font-family-dropdown-btn"
+                      onClick={() => setIsFontDropdownOpen((prev) => !prev)}
+                      aria-haspopup="listbox"
+                      aria-expanded={isFontDropdownOpen}
+                      style={{
+                        fontFamily:
+                          fontFamily && fontFamily !== 'default'
+                            ? getFontFamilyStyle(fontFamily)
+                            : 'inherit',
+                      }}
+                      className="inline-flex items-center justify-between gap-2 px-2.5 py-1 rounded-lg text-xs font-semibold bg-white dark:bg-slate-900 border border-slate-300 dark:border-purple-500/40 text-slate-900 dark:text-amber-200 hover:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/50 cursor-pointer shadow-xs transition-colors min-w-[135px]"
+                    >
+                      <span className="truncate">
+                        {CUSTOM_FONTS.find((f) => f.id === fontFamily)?.name || 'Modern Sans'}
+                      </span>
+                      <ChevronDown
+                        className={`w-3.5 h-3.5 text-slate-400 dark:text-amber-300/70 transition-transform duration-200 shrink-0 ${
+                          isFontDropdownOpen ? 'rotate-180' : ''
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Custom Font Dropdown Menu */}
+                  {isFontDropdownOpen && (
+                    <div
+                      id="custom-font-picker-menu"
+                      role="listbox"
+                      className="absolute right-0 top-full mt-1.5 z-50 w-72 max-h-72 overflow-y-auto bg-white/95 dark:bg-[#0c1833]/95 border border-slate-200 dark:border-amber-400/30 rounded-xl shadow-2xl backdrop-blur-xl p-1.5 space-y-1 custom-scrollbar animate-in fade-in zoom-in-95 duration-150"
+                    >
+                      <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-200/80 dark:border-white/10 mb-1 flex items-center justify-between">
+                        <span>Select Cosmic Font</span>
+                        <span className="text-[10px] text-amber-500 lowercase font-normal">{CUSTOM_FONTS.length} styles</span>
+                      </div>
+                      {CUSTOM_FONTS.map((f) => {
+                        const isSelected = fontFamily === f.id || (f.id === 'default' && (!fontFamily || fontFamily === 'default'));
+                        return (
+                          <button
+                            key={f.id}
+                            type="button"
+                            id={`font-option-${f.id.toLowerCase().replace(/\s+/g, '-')}`}
+                            role="option"
+                            aria-selected={isSelected}
+                            onClick={() => {
+                              setFontFamily(f.id);
+                              setIsFontDropdownOpen(false);
+                            }}
+                            className={`w-full text-left px-2.5 py-2 rounded-lg transition-all flex items-center justify-between group cursor-pointer ${
+                              isSelected
+                                ? 'bg-amber-100/80 dark:bg-amber-400/20 text-amber-950 dark:text-amber-200 border border-amber-300 dark:border-amber-400/40 shadow-xs'
+                                : 'hover:bg-slate-100 dark:hover:bg-white/[0.06] text-slate-800 dark:text-slate-200 border border-transparent'
+                            }`}
+                          >
+                            <div className="flex flex-col min-w-0 pr-2">
+                              <span
+                                className="text-sm font-semibold truncate leading-snug"
+                                style={f.style}
+                              >
+                                {f.name}
+                              </span>
+                              <span
+                                className="text-[11px] text-slate-500 dark:text-slate-400 truncate opacity-90 mt-0.5"
+                                style={f.style}
+                              >
+                                {f.sampleText}
+                              </span>
+                            </div>
+                            {isSelected && (
+                              <Check className="w-4 h-4 text-amber-600 dark:text-amber-300 shrink-0 ml-1.5" />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1454,7 +1523,7 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
                   className={`w-full min-h-[110px] p-4 rounded-xl bg-slate-50/90 dark:bg-black/50 border border-amber-400/40 text-slate-900 dark:text-white text-sm custom-scrollbar overflow-y-auto max-h-48 leading-relaxed shadow-inner ${getFontFamilyClass(
                     fontFamily
                   )}`}
-                  style={{ fontFamily: fontFamily && fontFamily !== 'default' ? `'${fontFamily}', cursive, sans-serif` : 'inherit' }}
+                  style={{ fontFamily: fontFamily && fontFamily !== 'default' ? `'${fontFamily}', sans-serif` : 'inherit' }}
                 >
                   {content.trim() ? (
                     <FormattedText text={content} />
@@ -1475,7 +1544,7 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
                   className={`w-full bg-slate-50 dark:bg-black/40 border border-slate-300 dark:border-white/10 text-slate-900 dark:text-white text-sm p-4 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400/40 placeholder-slate-400 custom-scrollbar font-normal transition-all ${getFontFamilyClass(
                     fontFamily
                   )}`}
-                  style={{ fontFamily: fontFamily && fontFamily !== 'default' ? `'${fontFamily}', cursive, sans-serif` : 'inherit' }}
+                  style={{ fontFamily: fontFamily && fontFamily !== 'default' ? `'${fontFamily}', sans-serif` : 'inherit' }}
                   required
                 />
               )}
