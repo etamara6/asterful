@@ -45,24 +45,13 @@ interface BroadcastModalProps {
   onOpenUserProfile?: (user: User) => void;
 }
 
-const COSMIC_SIMULATED_COMMENTS = [
-  'Transmission signal strength is 100%! 📡',
-  'Greetings from the Crab Nebula! 🌌✨',
-  'The starlight visualizer looks incredible! 💫',
-  'Can you point the telescope toward the Orion belt? 🔭',
-  'Love this cosmic frequency 🎶',
-  'Orbiters assembled! 🪐🪐',
-  'Such high stellar energy tonight! 🌟',
-  'Echoing this to my constellation! ✨',
-  'Supernova vibes! 💥⭐',
-];
-
 const PRESET_TITLES = [
   'Deep Space Stargazing & Live Telescope Feed 🔭✨',
   'Interstellar Ambient Live Synthesis & Chords 🎹🌌',
   'Astrophotography breakdown & Nebula Mapping 📸🌟',
   'Cosmic Q&A with Constellation Mates 🪐💫',
 ];
+
 
 export const BroadcastModal: React.FC<BroadcastModalProps> = ({
   isOpen,
@@ -120,43 +109,20 @@ export const BroadcastModal: React.FC<BroadcastModalProps> = ({
     commentsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeBroadcast?.comments]);
 
-  // Periodic simulated engagement for lively cosmos feeling
+  // Handle stream viewer fluctuations if broadcast active
   useEffect(() => {
     if (!isOpen || !activeBroadcast || !activeBroadcast.isLive) return;
 
-    // Simulate viewer fluctuations
     const viewerInterval = setInterval(() => {
-      const delta = Math.floor(Math.random() * 5) - 2;
+      const delta = Math.floor(Math.random() * 3) - 1;
       adjustViewerCount(activeBroadcast.id, delta);
-    }, 12000);
-
-    // Simulate occasional incoming comments from other explorers
-    const commentInterval = setInterval(() => {
-      if (Math.random() > 0.45) {
-        const randomComment =
-          COSMIC_SIMULATED_COMMENTS[Math.floor(Math.random() * COSMIC_SIMULATED_COMMENTS.length)];
-        const randomNames = [
-          { name: 'Dr. Orion Vance', id: 'exp-orion', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100' },
-          { name: 'Lyra Solstice ✨', id: 'exp-lyra', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100' },
-          { name: 'Nova Kane 🚀', id: 'exp-nova', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100' },
-          { name: 'Echo Stellar', id: 'exp-echo', avatar: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=100' },
-        ];
-        const randomSender = randomNames[Math.floor(Math.random() * randomNames.length)];
-        
-        addBroadcastComment(activeBroadcast.id, {
-          senderId: randomSender.id,
-          senderName: randomSender.name,
-          senderAvatar: randomSender.avatar,
-          text: randomComment,
-        });
-      }
-    }, 9000);
+    }, 20000);
 
     return () => {
       clearInterval(viewerInterval);
-      clearInterval(commentInterval);
     };
   }, [isOpen, activeBroadcast?.id, activeBroadcast?.isLive]);
+
 
   // Cosmic live audio/visualizer animation on canvas
   useEffect(() => {

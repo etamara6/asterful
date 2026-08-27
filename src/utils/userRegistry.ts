@@ -1,6 +1,6 @@
 import { User } from '../types';
-import { INITIAL_STARS } from '../data/initialStars';
 import { DEFAULT_COSMIC_AVATAR } from './colorPalette';
+
 
 export const REGISTERED_USERS_KEY = 'asterful_registered_users';
 export const LEGACY_REGISTERED_USERS_KEY = 'constellation_registered_users_v1';

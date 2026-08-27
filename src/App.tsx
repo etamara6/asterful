@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { CheckCircle2, Trash2, X } from 'lucide-react';
 import { StarNode, CanvasViewport, StarCluster, StarVisibility, User, UnlitStarDraft, Galaxy, StarStory, AuthorStoryGroup } from './types';
-import { INITIAL_STARS } from './data/initialStars';
 import { computeConstellationEdges, calculateSpawnPosition } from './utils/tagEngine';
+
 import { DEFAULT_CLUSTERS } from './utils/colorPalette';
 import { toggleFollowUser, getAllRegisteredUsers } from './utils/userRegistry';
 import { toggleStarLike, normalizeLikes } from './utils/likesHelper';
@@ -46,15 +46,13 @@ export default function App() {
 
   // One-time legacy localStorage cache clear check
   useEffect(() => {
-    const storageVersion = localStorage.getItem('asterful_v2');
+    const storageVersion = localStorage.getItem('asterful_purge_v3');
     if (!storageVersion) {
-      // Clean legacy mock cache keys safely without wiping user registrations
-      localStorage.removeItem('constellation_stars_v1');
-      localStorage.removeItem('constellation_stories_v1');
-      localStorage.removeItem('constellation_broadcasts_v1');
-      localStorage.setItem('asterful_v2', 'true');
+      localStorage.clear();
+      localStorage.setItem('asterful_purge_v3', 'true');
     }
   }, []);
+
 
   // 1. User Authentication State with localStorage Persistence
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
@@ -336,15 +334,16 @@ export default function App() {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved || '[]');
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed)) {
           return parsed;
         }
       }
     } catch {
       // ignore parsing errors
     }
-    return INITIAL_STARS;
+    return [];
   });
+
 
   const [selectedStarId, setSelectedStarId] = useState<string | null>(null);
   const [activeCluster, setActiveCluster] = useState<StarCluster | 'All'>('All');

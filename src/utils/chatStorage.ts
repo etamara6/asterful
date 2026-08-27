@@ -87,63 +87,12 @@ export function isUserInOrbit(userId: string, currentUserId?: string): boolean {
 }
 
 /**
- * Ensures a welcome message and guild group are provisioned when a new user arrives.
+ * Ensures user chat state is initialized cleanly.
  */
-export function ensureUserWelcomeChats(user: User): void {
-  if (!user || !user.id || user.isGuest) return;
-
-  const allRooms = loadAllStoredRooms();
-  const allMessages = loadAllStoredMessages();
-
-  let modified = false;
-
-  // 1. Ensure user is in the public Stellar Explorers Guild
-  const guildRoom = allRooms.find((r) => r.id === 'room-seed-group-stellar-explorers');
-  if (guildRoom && !guildRoom.participantIds.includes(user.id)) {
-    guildRoom.participantIds.push(user.id);
-    modified = true;
-  }
-
-  // 2. Check if user already has a welcome DM from Aria Chen
-  const hasAriaDm = allRooms.some(
-    (r) => !r.isGroup && r.participantIds.includes(user.id) && r.participantIds.includes('user-aria-chen')
-  );
-
-  if (!hasAriaDm && user.id !== 'user-aria-chen') {
-    const welcomeRoomId = `room-welcome-${user.id}`;
-    const welcomeRoom: ChatRoom = {
-      id: welcomeRoomId,
-      name: undefined,
-      isGroup: false,
-      participantIds: [user.id, 'user-aria-chen'],
-      lastMessage: 'Aria Chen: Welcome to Asterful! 🪐✨ Reach out anytime to collaborate.',
-      updatedAt: new Date().toISOString(),
-    };
-
-    const welcomeMsg: ChatMessage = {
-      id: `msg-welcome-${user.id}`,
-      roomId: welcomeRoomId,
-      senderId: 'user-aria-chen',
-      senderName: 'Aria Chen',
-      text: `Welcome to Asterful, ${user.displayName || user.username || 'Stargazer'}! 🪐✨ Feel free to explore our cosmic idea graph, remix stars, or message any creator.`,
-      timestamp: new Date().toISOString(),
-    };
-
-    allRooms.unshift(welcomeRoom);
-    allMessages.push(welcomeMsg);
-    modified = true;
-  }
-
-  if (modified) {
-    try {
-      localStorage.setItem(CHAT_ROOMS_KEY, JSON.stringify(allRooms));
-      localStorage.setItem(CHAT_MESSAGES_KEY, JSON.stringify(allMessages));
-      dispatchChatUpdate();
-    } catch {
-      // ignore
-    }
-  }
+export function ensureUserWelcomeChats(_user: User): void {
+  // No-op: all conversations are user-initiated and empty by default
 }
+
 
 /**
  * STRICT PRIVACY: Retrieves only rooms where the user's ID is in participantIds.
