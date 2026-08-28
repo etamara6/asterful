@@ -13,30 +13,37 @@ interface GalaxyParticle {
   y: number;
   vx: number;
   vy: number;
+  swirlAngle: number;
+  swirlSpeed: number;
+  swirlDelta: number;
   size: number;
   initialSize: number;
   life: number;
   maxLife: number;
   color: string;
-  shape: '4-point-star' | 'circle' | 'sparkle';
+  shape: 'point' | 'starburst' | 'sparkle' | 'orb' | 'diamond';
   rotation: number;
   rotSpeed: number;
 }
 
-// Celestial cosmic palette: Starlight Gold, Bright Amber, Cyan, Electric Violet, Nebula Magenta, Pure White Core
-const GALAXY_PALETTE = [
-  '#FFD700', // Starlight Gold
-  '#FFE600', // Amber Glow
-  '#00D2D3', // Cosmic Cyan
-  '#7D5FFF', // Electric Violet
-  '#E056FD', // Nebula Magenta
-  '#FFFFFF', // Starlight Core
+// Complete vibrant cosmic palette: Cyan, Magenta, Yellow, Purple, Green, and Pure White
+const COSMIC_TRAIL_PALETTE = [
+  '#00F0FF', // Cyan
+  '#06B6D4', // Deep Cyan
+  '#FF007F', // Magenta
+  '#EC4899', // Hot Pink / Magenta
+  '#FFE600', // Electric Yellow
+  '#FFD700', // Gold Yellow
+  '#A855F7', // Vivid Purple
+  '#8B5CF6', // Royal Purple
+  '#00FF9D', // Cosmic Green
+  '#10B981', // Emerald Green
+  '#FFFFFF', // Starlight White
 ];
 
-// Capped trail length (25-30 max points to strictly bound memory)
-const MAX_TRAIL_POINTS = 28;
-const MAX_PARTICLES = 120;
-const LERP_SMOOTHING = 0.2;
+const MAX_TRAIL_POINTS = 32;
+const MAX_PARTICLES = 160;
+const LERP_SMOOTHING = 0.24;
 
 export const GalaxyCursorTrail: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -67,7 +74,7 @@ export const GalaxyCursorTrail: React.FC = () => {
     let animFrameId: number = 0;
     let isRunning = true;
 
-    // Retina Display & High DPI Scaling (capped at 2 for performance)
+    // Retina Display & High DPI Scaling (capped at 2 for silky performance)
     const resizeCanvas = () => {
       if (!canvas || !ctx) return;
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -90,26 +97,49 @@ export const GalaxyCursorTrail: React.FC = () => {
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas, { passive: true });
 
-    // Spawn a celestial stardust particle at coordinates without triggering re-renders
-    const spawnParticleAt = (x: number, y: number, spread = 2.5) => {
+    // Spawn rich celestial stardust particles with diverse shapes & swirl physics
+    const spawnParticleAt = (x: number, y: number, velocityX = 0, velocityY = 0) => {
       const particles = particlesRef.current;
       if (particles.length >= MAX_PARTICLES) {
-        particles.shift(); // FIFO drop for memory safety
+        particles.shift(); // Safe bounding
       }
 
       const angle = Math.random() * Math.PI * 2;
-      const speed = 0.25 + Math.random() * 0.95;
-      const color = GALAXY_PALETTE[Math.floor(Math.random() * GALAXY_PALETTE.length)];
+      const baseSpeed = 0.4 + Math.random() * 1.6;
+      const color = COSMIC_TRAIL_PALETTE[Math.floor(Math.random() * COSMIC_TRAIL_PALETTE.length)];
+      
       const roll = Math.random();
-      const shape: GalaxyParticle['shape'] = roll > 0.55 ? '4-point-star' : roll > 0.25 ? 'circle' : 'sparkle';
-      const initialSize = shape === '4-point-star' ? 1.4 + Math.random() * 2.0 : 0.8 + Math.random() * 1.6;
-      const maxLife = 18 + Math.floor(Math.random() * 12);
+      let shape: GalaxyParticle['shape'] = 'point';
+      let initialSize = 1.0;
+
+      if (roll > 0.72) {
+        shape = 'starburst';
+        initialSize = 2.4 + Math.random() * 2.8;
+      } else if (roll > 0.48) {
+        shape = 'sparkle';
+        initialSize = 1.8 + Math.random() * 2.0;
+      } else if (roll > 0.28) {
+        shape = 'diamond';
+        initialSize = 1.5 + Math.random() * 1.8;
+      } else if (roll > 0.14) {
+        shape = 'orb';
+        initialSize = 1.2 + Math.random() * 1.8;
+      } else {
+        shape = 'point';
+        initialSize = 0.8 + Math.random() * 1.2;
+      }
+
+      const maxLife = 22 + Math.floor(Math.random() * 18);
+      const swirlDir = Math.random() > 0.5 ? 1 : -1;
 
       particles.push({
-        x: x + (Math.random() - 0.5) * spread,
-        y: y + (Math.random() - 0.5) * spread,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed,
+        x: x + (Math.random() - 0.5) * 6,
+        y: y + (Math.random() - 0.5) * 6,
+        vx: Math.cos(angle) * baseSpeed + velocityX * 0.15,
+        vy: Math.sin(angle) * baseSpeed + velocityY * 0.15,
+        swirlAngle: Math.random() * Math.PI * 2,
+        swirlSpeed: 0.2 + Math.random() * 0.5,
+        swirlDelta: (0.04 + Math.random() * 0.08) * swirlDir,
         size: initialSize,
         initialSize,
         life: maxLife,
@@ -117,11 +147,11 @@ export const GalaxyCursorTrail: React.FC = () => {
         color,
         shape,
         rotation: Math.random() * Math.PI,
-        rotSpeed: (Math.random() - 0.5) * 0.12,
+        rotSpeed: (Math.random() - 0.5) * 0.16,
       });
     };
 
-    // Passive Pointer & Mouse Listeners (Zero React state updates)
+    // Passive Pointer & Mouse Listeners (Zero React state triggers)
     const handlePointerMove = (e: PointerEvent) => {
       mouseRef.current = { x: e.clientX, y: e.clientY, isActive: true };
     };
@@ -149,8 +179,8 @@ export const GalaxyCursorTrail: React.FC = () => {
     window.addEventListener('pointerup', handlePointerLeave, { passive: true });
     document.addEventListener('mouseleave', handlePointerLeave, { passive: true });
 
-    // Native 2D Star Polygon Drawer
-    const draw4PointStar = (
+    // Geometric micro-starburst and sparkle renderer
+    const drawStarburst = (
       context: CanvasRenderingContext2D,
       cx: number,
       cy: number,
@@ -160,15 +190,13 @@ export const GalaxyCursorTrail: React.FC = () => {
       rotation: number
     ) => {
       let rot = (Math.PI / 2) * 3 + rotation;
-      let x = cx;
-      let y = cy;
       const step = Math.PI / spikes;
 
       context.beginPath();
       context.moveTo(cx, cy - outerRadius);
       for (let i = 0; i < spikes; i++) {
-        x = cx + Math.cos(rot) * outerRadius;
-        y = cy + Math.sin(rot) * outerRadius;
+        let x = cx + Math.cos(rot) * outerRadius;
+        let y = cy + Math.sin(rot) * outerRadius;
         context.lineTo(x, y);
         rot += step;
 
@@ -180,6 +208,28 @@ export const GalaxyCursorTrail: React.FC = () => {
       context.lineTo(cx, cy - outerRadius);
       context.closePath();
       context.fill();
+    };
+
+    // Diamond sparkle shape
+    const drawDiamond = (
+      context: CanvasRenderingContext2D,
+      cx: number,
+      cy: number,
+      width: number,
+      height: number,
+      rotation: number
+    ) => {
+      context.save();
+      context.translate(cx, cy);
+      context.rotate(rotation);
+      context.beginPath();
+      context.moveTo(0, -height);
+      context.lineTo(width, 0);
+      context.lineTo(0, height);
+      context.lineTo(-width, 0);
+      context.closePath();
+      context.fill();
+      context.restore();
     };
 
     // Dedicated Animation Loop using requestAnimationFrame
@@ -201,32 +251,38 @@ export const GalaxyCursorTrail: React.FC = () => {
           rendered.y = mouse.y;
           rendered.initialized = true;
         } else {
-          // Lerp trailing point toward target coordinates before drawing
+          const prevX = rendered.x;
+          const prevY = rendered.y;
+
           rendered.x += (mouse.x - rendered.x) * LERP_SMOOTHING;
           rendered.y += (mouse.y - rendered.y) * LERP_SMOOTHING;
-        }
 
-        // Add trail point when moved
-        const lastPoint = trail[trail.length - 1];
-        const dist = lastPoint ? Math.hypot(rendered.x - lastPoint.x, rendered.y - lastPoint.y) : 999;
+          const dx = rendered.x - prevX;
+          const dy = rendered.y - prevY;
+          const speed = Math.hypot(dx, dy);
 
-        if (dist > 1.2) {
-          trail.push({
-            x: rendered.x,
-            y: rendered.y,
-            alpha: 1.0,
-            size: 3.8,
-            color: GALAXY_PALETTE[Math.floor(Math.random() * GALAXY_PALETTE.length)],
-          });
+          // Add trail point when moved
+          const lastPoint = trail[trail.length - 1];
+          const dist = lastPoint ? Math.hypot(rendered.x - lastPoint.x, rendered.y - lastPoint.y) : 999;
 
-          // Cap trail array length to max 25-30 points (pops off older points)
-          while (trail.length > MAX_TRAIL_POINTS) {
-            trail.shift();
-          }
+          if (dist > 1.0) {
+            trail.push({
+              x: rendered.x,
+              y: rendered.y,
+              alpha: 1.0,
+              size: Math.min(4.5, 2.8 + speed * 0.15),
+              color: COSMIC_TRAIL_PALETTE[Math.floor(Math.random() * COSMIC_TRAIL_PALETTE.length)],
+            });
 
-          // Subtle sparkling stardust emission
-          if (Math.random() > 0.35) {
-            spawnParticleAt(rendered.x, rendered.y, 2.0);
+            while (trail.length > MAX_TRAIL_POINTS) {
+              trail.shift();
+            }
+
+            // Vibrant particle emission matching original density (cyan, magenta, yellow, purple, green, white)
+            const count = speed > 5 ? 3 : speed > 1.5 ? 2 : 1;
+            for (let k = 0; k < count; k++) {
+              spawnParticleAt(rendered.x, rendered.y, dx, dy);
+            }
           }
         }
       }
@@ -234,7 +290,7 @@ export const GalaxyCursorTrail: React.FC = () => {
       // Clear frame strictly on each RAF cycle
       ctx.clearRect(0, 0, width, height);
 
-      // --- 1. Draw Smooth Glowing Celestial Trail Ribbon ---
+      // --- 1. Draw Smooth Glowing Multi-Color Celestial Ribbon ---
       if (trail.length > 1) {
         ctx.save();
         ctx.lineCap = 'round';
@@ -249,22 +305,22 @@ export const GalaxyCursorTrail: React.FC = () => {
 
           if (segmentAlpha <= 0.01) continue;
 
-          // Outer aura glow
+          // Outer aura glow with full vibrant palette
           ctx.beginPath();
           ctx.moveTo(p1.x, p1.y);
           ctx.lineTo(p2.x, p2.y);
           ctx.strokeStyle = p2.color;
-          ctx.globalAlpha = segmentAlpha * 0.28;
-          ctx.lineWidth = p1.size * progress * 2.8;
+          ctx.globalAlpha = segmentAlpha * 0.45;
+          ctx.lineWidth = p1.size * progress * 3.2;
           ctx.stroke();
 
-          // Inner sharp starlight beam
+          // Inner sharp white/colored core beam
           ctx.beginPath();
           ctx.moveTo(p1.x, p1.y);
           ctx.lineTo(p2.x, p2.y);
           ctx.strokeStyle = '#FFFFFF';
-          ctx.globalAlpha = segmentAlpha * 0.85;
-          ctx.lineWidth = Math.max(1, p1.size * progress * 0.9);
+          ctx.globalAlpha = segmentAlpha * 0.9;
+          ctx.lineWidth = Math.max(1, p1.size * progress * 0.95);
           ctx.stroke();
         }
 
@@ -273,13 +329,13 @@ export const GalaxyCursorTrail: React.FC = () => {
 
       // Trail decay
       for (let i = trail.length - 1; i >= 0; i--) {
-        trail[i].alpha *= 0.91;
-        if (trail[i].alpha <= 0.03) {
+        trail[i].alpha *= 0.90;
+        if (trail[i].alpha <= 0.02) {
           trail.splice(i, 1);
         }
       }
 
-      // --- 2. Draw Sparkling Star Particles ---
+      // --- 2. Draw Diverse Sparkling Star Particles with Swirl Physics ---
       for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
         p.life -= 1;
@@ -289,50 +345,73 @@ export const GalaxyCursorTrail: React.FC = () => {
           continue;
         }
 
-        // Particle physics
-        p.x += p.vx;
-        p.y += p.vy;
-        p.vx *= 0.96;
-        p.vy *= 0.96;
+        // Swirl and natural drift physics
+        p.swirlAngle += p.swirlDelta;
+        p.x += p.vx + Math.cos(p.swirlAngle) * p.swirlSpeed;
+        p.y += p.vy + Math.sin(p.swirlAngle) * p.swirlSpeed;
+        p.vx *= 0.95;
+        p.vy *= 0.95;
         p.rotation += p.rotSpeed;
 
         const progress = p.life / p.maxLife;
-        const alpha = Math.min(1, Math.max(0, progress * 1.1));
-        p.size = p.initialSize * (0.3 + 0.7 * progress);
+        const alpha = Math.min(1, Math.max(0, Math.pow(progress, 0.9) * 1.15));
+        p.size = p.initialSize * (0.25 + 0.75 * progress);
 
         ctx.save();
 
-        if (p.shape === '4-point-star') {
-          // Radial soft aura
-          const glowGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 3.0);
+        if (p.shape === 'starburst') {
+          // 8-point / 4-point micro-starburst with soft aura glow
+          const glowGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 3.5);
           glowGrad.addColorStop(0, p.color);
           glowGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-          ctx.globalAlpha = alpha * 0.35;
+          ctx.globalAlpha = alpha * 0.45;
           ctx.fillStyle = glowGrad;
           ctx.beginPath();
-          ctx.arc(p.x, p.y, p.size * 3.0, 0, Math.PI * 2);
+          ctx.arc(p.x, p.y, p.size * 3.5, 0, Math.PI * 2);
           ctx.fill();
 
-          // Star Core
+          // Core Starburst
           ctx.globalAlpha = alpha;
           ctx.fillStyle = p.color;
-          draw4PointStar(ctx, p.x, p.y, 4, p.size * 2.2, p.size * 0.5, p.rotation);
+          drawStarburst(ctx, p.x, p.y, 4, p.size * 2.4, p.size * 0.4, p.rotation);
+
+          // White center glint
+          ctx.fillStyle = '#FFFFFF';
+          ctx.globalAlpha = alpha * 0.9;
+          drawStarburst(ctx, p.x, p.y, 4, p.size * 1.2, p.size * 0.25, p.rotation);
         } else if (p.shape === 'sparkle') {
-          // Cross sparkle
-          ctx.globalAlpha = alpha;
+          // Distinct 4-point cross sparkle
+          ctx.globalAlpha = alpha * 0.95;
           ctx.fillStyle = p.color;
-          draw4PointStar(ctx, p.x, p.y, 4, p.size * 1.7, p.size * 0.3, p.rotation);
-        } else {
+          drawStarburst(ctx, p.x, p.y, 4, p.size * 1.9, p.size * 0.35, p.rotation);
+          ctx.fillStyle = '#FFFFFF';
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, Math.max(0.6, p.size * 0.35), 0, Math.PI * 2);
+          ctx.fill();
+        } else if (p.shape === 'diamond') {
+          // Rotating diamond flare
+          ctx.globalAlpha = alpha * 0.9;
+          ctx.fillStyle = p.color;
+          drawDiamond(ctx, p.x, p.y, p.size * 0.7, p.size * 1.4, p.rotation);
+        } else if (p.shape === 'orb') {
           // Glowing celestial orb / stardust
-          const orbGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 2.0);
-          orbGrad.addColorStop(0, p.color);
-          orbGrad.addColorStop(0.6, p.color);
+          const orbGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 2.4);
+          orbGrad.addColorStop(0, '#FFFFFF');
+          orbGrad.addColorStop(0.35, p.color);
+          orbGrad.addColorStop(0.7, p.color);
           orbGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
 
           ctx.globalAlpha = alpha;
           ctx.fillStyle = orbGrad;
           ctx.beginPath();
-          ctx.arc(p.x, p.y, p.size * 2.0, 0, Math.PI * 2);
+          ctx.arc(p.x, p.y, p.size * 2.4, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          // Tiny vibrant point
+          ctx.globalAlpha = alpha;
+          ctx.fillStyle = p.color;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, Math.max(0.5, p.size), 0, Math.PI * 2);
           ctx.fill();
         }
 
@@ -377,5 +456,6 @@ export const GalaxyCursorTrail: React.FC = () => {
     />
   );
 };
+
 
 
