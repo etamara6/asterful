@@ -41,16 +41,16 @@ const LERP_SMOOTHING = 0.2;
 export const GalaxyCursorTrail: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // 1. Mouse Coordinates, Trail Points & Particles live strictly inside useRef (Zero React re-renders)
-  const targetMouseRef = useRef<{ x: number; y: number; isActive: boolean }>({
-    x: 0,
-    y: 0,
+  // 1. Mouse coordinates, trail points & active particles live strictly inside useRef (Zero React re-renders)
+  const mouseRef = useRef<{ x: number; y: number; isActive: boolean }>({
+    x: -1000,
+    y: -1000,
     isActive: false,
   });
 
   const renderedMouseRef = useRef<{ x: number; y: number; initialized: boolean }>({
-    x: 0,
-    y: 0,
+    x: -1000,
+    y: -1000,
     initialized: false,
   });
 
@@ -64,13 +64,10 @@ export const GalaxyCursorTrail: React.FC = () => {
     const ctx = canvas.getContext('2d', { alpha: true });
     if (!ctx) return;
 
-    let animFrameId = 0;
+    let animFrameId: number = 0;
     let isRunning = true;
-    let isIntersecting = true;
-    let lastRenderTime = performance.now();
-    const FRAME_MIN_TIME = 1000 / 60; // 60 FPS cap
 
-    // 3. Retina Display & High DPI Scaling (capped at 2 for performance)
+    // Retina Display & High DPI Scaling (capped at 2 for performance)
     const resizeCanvas = () => {
       if (!canvas || !ctx) return;
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -124,41 +121,24 @@ export const GalaxyCursorTrail: React.FC = () => {
       });
     };
 
-    // Wake up the requestAnimationFrame loop if currently idle
-    const requestFrameIfNeeded = () => {
-      if (!animFrameId && isRunning && !document.hidden && isIntersecting) {
-        lastRenderTime = performance.now();
-        animFrameId = requestAnimationFrame(render);
-      }
-    };
-
-    // 3. Pointer & Mouse Event Listeners with { passive: true } (Zero setState)
+    // Passive Pointer & Mouse Listeners (Zero React state updates)
     const handlePointerMove = (e: PointerEvent) => {
-      targetMouseRef.current.x = e.clientX;
-      targetMouseRef.current.y = e.clientY;
-      targetMouseRef.current.isActive = true;
-      requestFrameIfNeeded();
+      mouseRef.current = { x: e.clientX, y: e.clientY, isActive: true };
     };
 
     const handleMouseMove = (e: MouseEvent) => {
-      targetMouseRef.current.x = e.clientX;
-      targetMouseRef.current.y = e.clientY;
-      targetMouseRef.current.isActive = true;
-      requestFrameIfNeeded();
+      mouseRef.current = { x: e.clientX, y: e.clientY, isActive: true };
     };
 
     const handleTouchMove = (e: TouchEvent) => {
       if (e.touches.length > 0) {
         const touch = e.touches[0];
-        targetMouseRef.current.x = touch.clientX;
-        targetMouseRef.current.y = touch.clientY;
-        targetMouseRef.current.isActive = true;
-        requestFrameIfNeeded();
+        mouseRef.current = { x: touch.clientX, y: touch.clientY, isActive: true };
       }
     };
 
     const handlePointerLeave = () => {
-      targetMouseRef.current.isActive = false;
+      mouseRef.current.isActive = false;
       renderedMouseRef.current.initialized = false;
     };
 
@@ -202,38 +182,28 @@ export const GalaxyCursorTrail: React.FC = () => {
       context.fill();
     };
 
-    // Main animation and rendering loop
-    const render = (now: number) => {
-      if (!isRunning || document.hidden || !isIntersecting) {
-        animFrameId = 0;
-        return;
-      }
-
-      const elapsed = now - lastRenderTime;
-      if (elapsed < FRAME_MIN_TIME) {
-        animFrameId = requestAnimationFrame(render);
-        return;
-      }
-      lastRenderTime = now - (elapsed % FRAME_MIN_TIME);
+    // Dedicated Animation Loop using requestAnimationFrame
+    const animate = () => {
+      if (!isRunning) return;
 
       const width = window.innerWidth;
       const height = window.innerHeight;
 
-      const target = targetMouseRef.current;
+      const mouse = mouseRef.current;
       const rendered = renderedMouseRef.current;
       const trail = trailPointsRef.current;
       const particles = particlesRef.current;
 
-      // 2. Linear Interpolation (Lerp) Smoothing
-      if (target.isActive) {
+      // Linear Interpolation (Lerp) Smoothing
+      if (mouse.isActive) {
         if (!rendered.initialized) {
-          rendered.x = target.x;
-          rendered.y = target.y;
+          rendered.x = mouse.x;
+          rendered.y = mouse.y;
           rendered.initialized = true;
         } else {
           // Lerp trailing point toward target coordinates before drawing
-          rendered.x += (target.x - rendered.x) * LERP_SMOOTHING;
-          rendered.y += (target.y - rendered.y) * LERP_SMOOTHING;
+          rendered.x += (mouse.x - rendered.x) * LERP_SMOOTHING;
+          rendered.y += (mouse.y - rendered.y) * LERP_SMOOTHING;
         }
 
         // Add trail point when moved
@@ -249,7 +219,7 @@ export const GalaxyCursorTrail: React.FC = () => {
             color: GALAXY_PALETTE[Math.floor(Math.random() * GALAXY_PALETTE.length)],
           });
 
-          // 3. Cap trail array length to max 25-30 points (pops off older points)
+          // Cap trail array length to max 25-30 points (pops off older points)
           while (trail.length > MAX_TRAIL_POINTS) {
             trail.shift();
           }
@@ -261,14 +231,7 @@ export const GalaxyCursorTrail: React.FC = () => {
         }
       }
 
-      // Check if anything is visible to render
-      if (trail.length === 0 && particles.length === 0 && !target.isActive) {
-        ctx.clearRect(0, 0, width, height);
-        animFrameId = 0;
-        return;
-      }
-
-      // Clear frame
+      // Clear frame strictly on each RAF cycle
       ctx.clearRect(0, 0, width, height);
 
       // --- 1. Draw Smooth Glowing Celestial Trail Ribbon ---
@@ -376,43 +339,10 @@ export const GalaxyCursorTrail: React.FC = () => {
         ctx.restore();
       }
 
-      // Continue loop if active or lingering
-      if (isRunning && !document.hidden && isIntersecting && (trail.length > 0 || particles.length > 0 || target.isActive)) {
-        animFrameId = requestAnimationFrame(render);
-      } else {
-        animFrameId = 0;
-      }
+      animFrameId = requestAnimationFrame(animate);
     };
 
-    // IntersectionObserver to pause rendering when canvas is scrolled out of viewport
-    let observer: IntersectionObserver | null = null;
-    if (typeof IntersectionObserver !== 'undefined' && canvas) {
-      observer = new IntersectionObserver(
-        (entries) => {
-          const entry = entries[0];
-          isIntersecting = entry ? entry.isIntersecting : true;
-          if (isIntersecting && !document.hidden && isRunning && !animFrameId) {
-            requestFrameIfNeeded();
-          }
-        },
-        { threshold: 0.05 }
-      );
-      observer.observe(canvas);
-    }
-
-    // Tab Visibility Handler to pause animation when tab is inactive
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        if (animFrameId) {
-          cancelAnimationFrame(animFrameId);
-          animFrameId = 0;
-        }
-      } else {
-        requestFrameIfNeeded();
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    animFrameId = requestAnimationFrame(animate);
 
     return () => {
       isRunning = false;
@@ -423,13 +353,8 @@ export const GalaxyCursorTrail: React.FC = () => {
       window.removeEventListener('pointerleave', handlePointerLeave);
       window.removeEventListener('pointerup', handlePointerLeave);
       document.removeEventListener('mouseleave', handlePointerLeave);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      if (observer) {
-        observer.disconnect();
-      }
       if (animFrameId) {
         cancelAnimationFrame(animFrameId);
-        animFrameId = 0;
       }
     };
   }, []);
@@ -447,6 +372,7 @@ export const GalaxyCursorTrail: React.FC = () => {
         height: '100vh',
         pointerEvents: 'none',
         zIndex: 9999,
+        willChange: 'transform',
       }}
     />
   );

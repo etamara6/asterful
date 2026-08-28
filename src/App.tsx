@@ -1250,6 +1250,9 @@ export default function App() {
           setIsProfileModalOpen(true);
         }}
       />
+
+      {/* Interactive Starlight Galaxy Cursor Trail */}
+      <GalaxyCursorTrail />
     </div>
   );
 }
