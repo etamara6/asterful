@@ -59,7 +59,7 @@ import { extractThematicTags, extractThematicTagsWithAI } from '../utils/tagEngi
 import { getAllRegisteredUsers, generateCleanHandle } from '../utils/userRegistry';
 import { getStoredUniverses, saveUniverse, getUserUniverses } from '../utils/universeRegistry';
 import { getStoredDrafts, saveDraft, deleteDraft } from '../utils/draftStorage';
-import { getStoredGalaxies } from '../utils/galaxyRegistry';
+import { getStoredGalaxies, saveGalaxy, GALAXY_UPDATE_EVENT, createOrGetCustomGalaxy } from '../utils/galaxyRegistry';
 import { TERMS } from '../constants/terminology';
 import { FormattedText } from './FormattedText';
 import { CUSTOM_FONTS, getFontFamilyClass, getFontFamilyStyle } from '../constants/fonts';
@@ -145,6 +145,11 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
   const [selectedUniverseId, setSelectedUniverseId] = useState<string>('__create_new__');
   const [newUniverseName, setNewUniverseName] = useState<string>('');
   const [selectedGalaxyId, setSelectedGalaxyId] = useState<string>('');
+  const [isCreatingCustomGalaxy, setIsCreatingCustomGalaxy] = useState(false);
+  const [customGalaxyName, setCustomGalaxyName] = useState('');
+  const [allStoredGalaxies, setAllStoredGalaxies] = useState<Galaxy[]>(() => getStoredGalaxies());
+  const prevCustomTagRef = useRef<string | null>(null);
+  const customGalaxyIdRef = useRef<string | null>(null);
   const [isPreviewMode, setIsPreviewMode] = useState(false);
   const contentRef = useRef<HTMLTextAreaElement>(null);
 
@@ -192,14 +197,17 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       refreshDrafts();
+      setAllStoredGalaxies(getStoredGalaxies());
     }
   }, [isOpen, currentUser?.id]);
 
-  // Load stored galaxies
-  const allStoredGalaxies = useMemo(() => {
-    if (!isOpen) return [];
-    return getStoredGalaxies();
-  }, [isOpen]);
+  useEffect(() => {
+    const handleGalaxiesUpdated = () => {
+      setAllStoredGalaxies(getStoredGalaxies());
+    };
+    window.addEventListener(GALAXY_UPDATE_EVENT, handleGalaxiesUpdated);
+    return () => window.removeEventListener(GALAXY_UPDATE_EVENT, handleGalaxiesUpdated);
+  }, []);
 
   // Available users for Our Universe sharing
   const registeredUsers = useMemo(() => {
@@ -331,6 +339,10 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
       setIsPreviewMode(false);
       setUniverseSearchInput('');
       setIsUniverseDropdownOpen(false);
+      setIsCreatingCustomGalaxy(false);
+      setCustomGalaxyName('');
+      prevCustomTagRef.current = null;
+      customGalaxyIdRef.current = null;
 
       if (editingStar) {
         // Reform Star Mode
@@ -443,12 +455,77 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
     }
   }, [isOpen, remixParentStar, defaultCluster, defaultGalaxy, currentUser, editingStar, initialDraft]);
 
+  const handleCustomGalaxyNameChange = (val: string) => {
+    setCustomGalaxyName(val);
+    const cleanName = val.trim().replace(/^#+/, '');
+    if (!cleanName) {
+      setSelectedGalaxyId('');
+      if (prevCustomTagRef.current) {
+        const oldTag = prevCustomTagRef.current;
+        setTags((prev) => prev.filter((t) => t.toLowerCase() !== oldTag.toLowerCase()));
+        prevCustomTagRef.current = null;
+      }
+      return;
+    }
+
+    const cleanTag = `#${cleanName.replace(/\s+/g, '')}`;
+
+    // Look for existing or create new galaxy
+    const existing = allStoredGalaxies.find(
+      (g) => g.name.toLowerCase() === cleanName.toLowerCase() || g.tag.toLowerCase() === cleanTag.toLowerCase()
+    );
+
+    let galaxyToUse: Galaxy;
+    if (existing) {
+      galaxyToUse = existing;
+    } else {
+      const id = customGalaxyIdRef.current || `galaxy-${Date.now()}`;
+      customGalaxyIdRef.current = id;
+      galaxyToUse = {
+        id,
+        name: cleanName,
+        tag: cleanTag,
+        description: `Topic hub for ${cleanName} in the Asterful cosmos.`,
+        icon: '🌌',
+        category: 'General',
+        glowColor: '#FFD700',
+        memberIds: currentUser?.id ? [currentUser.id] : ['guest-explorer'],
+        creatorId: currentUser?.id || 'guest-explorer',
+        createdAt: new Date().toISOString().split('T')[0],
+        rules: [
+          'Respect fellow explorers in this galaxy.',
+          'Share thoughtful and creative cosmic discoveries.'
+        ]
+      };
+      saveGalaxy(galaxyToUse);
+    }
+
+    setSelectedGalaxyId(galaxyToUse.id);
+
+    // Dynamically update tags with generated hashtag (#GalaxyName)
+    setTags((prevTags) => {
+      const oldTag = prevCustomTagRef.current;
+      const withoutOld = oldTag ? prevTags.filter((t) => t.toLowerCase() !== oldTag.toLowerCase()) : prevTags;
+      prevCustomTagRef.current = cleanTag;
+      if (!withoutOld.some((t) => t.toLowerCase() === cleanTag.toLowerCase())) {
+        return [...withoutOld, cleanTag];
+      }
+      return withoutOld;
+    });
+  };
+
   const handleSaveAsDraft = () => {
     if (!title.trim() && !content.trim()) {
       setErrorMsg('Please enter a title or thought before saving as an Unlit Star.');
       return;
     }
-    const chosenGalaxy = allStoredGalaxies.find((g) => g.id === selectedGalaxyId);
+    let chosenGalaxy = allStoredGalaxies.find((g) => g.id === selectedGalaxyId);
+    if (isCreatingCustomGalaxy && customGalaxyName.trim()) {
+      const cleanName = customGalaxyName.trim().replace(/^#+/, '');
+      if (!chosenGalaxy) {
+        chosenGalaxy = createOrGetCustomGalaxy(cleanName, currentUser?.id) || undefined;
+      }
+    }
     const saved = saveDraft({
       id: activeDraftId || undefined,
       userId: currentUser?.id,
@@ -457,7 +534,7 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
       cluster,
       universeName: newUniverseName.trim() || undefined,
       universes: selectedUniverses,
-      galaxyId: selectedGalaxyId || undefined,
+      galaxyId: chosenGalaxy?.id || selectedGalaxyId || undefined,
       galaxyName: chosenGalaxy?.name || undefined,
       tags,
       visibility: visibilityMode === 'only_me' ? 'private' : visibilityMode === 'shared' ? 'private' : 'public',
@@ -595,8 +672,16 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
 
     // Ensure at least 3 thematic tags are generated
     let finalTags = [...tags];
-    const chosenGalaxy = allStoredGalaxies.find((g) => g.id === selectedGalaxyId);
-    if (chosenGalaxy && chosenGalaxy.tag) {
+    let chosenGalaxy = allStoredGalaxies.find((g) => g.id === selectedGalaxyId);
+    if (isCreatingCustomGalaxy && customGalaxyName.trim()) {
+      const cleanName = customGalaxyName.trim().replace(/^#+/, '');
+      if (!chosenGalaxy) {
+        chosenGalaxy = createOrGetCustomGalaxy(cleanName, currentUser?.id) || undefined;
+      }
+      if (chosenGalaxy && chosenGalaxy.tag) {
+        finalTags = Array.from(new Set([...finalTags, chosenGalaxy.tag]));
+      }
+    } else if (chosenGalaxy && chosenGalaxy.tag) {
       finalTags = Array.from(new Set([...finalTags, chosenGalaxy.tag]));
     }
     if (finalTags.length < 3) {
@@ -1058,11 +1143,11 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
               </div>
             )}
 
-            {/* Galaxy (Topic Hub) Dropdown Selector */}
+            {/* Galaxy (Topic Hub) Dropdown & Custom Galaxy Creator */}
             <div className="p-3.5 rounded-xl bg-purple-500/10 border border-purple-400/20 backdrop-blur-md">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
-                  <label htmlFor="select-star-galaxy" className="block text-xs font-semibold uppercase tracking-wider text-purple-900 dark:text-purple-200 flex items-center gap-1.5">
+                  <label htmlFor={isCreatingCustomGalaxy ? "input-custom-galaxy-name" : "select-star-galaxy"} className="block text-xs font-semibold uppercase tracking-wider text-purple-900 dark:text-purple-200 flex items-center gap-1.5">
                     <span>🌌</span>
                     <span>{TERMS.COMMUNITY} (Optional Hub)</span>
                   </label>
@@ -1070,50 +1155,131 @@ export const CreateStarModal: React.FC<CreateStarModalProps> = ({
                     Topic Hub
                   </span>
                 </div>
-                {selectedGalaxyId && (
+                <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setSelectedGalaxyId('')}
-                    className="text-[10px] text-purple-600 dark:text-purple-300 hover:text-purple-800 dark:hover:text-purple-100 transition-colors"
+                    id="btn-toggle-custom-galaxy"
+                    onClick={() => {
+                      if (isCreatingCustomGalaxy) {
+                        setIsCreatingCustomGalaxy(false);
+                        setCustomGalaxyName('');
+                      } else {
+                        setIsCreatingCustomGalaxy(true);
+                      }
+                    }}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-purple-700 dark:text-purple-300 hover:text-purple-900 dark:hover:text-white bg-purple-500/15 hover:bg-purple-500/25 px-2.5 py-0.5 rounded-lg border border-purple-400/30 transition-all cursor-pointer"
                   >
-                    Clear Hub
+                    <Plus className="w-3 h-3" />
+                    <span>{isCreatingCustomGalaxy ? 'Choose Existing' : '+ New Galaxy'}</span>
                   </button>
-                )}
+
+                  {selectedGalaxyId && !isCreatingCustomGalaxy && (
+                    <button
+                      type="button"
+                      id="btn-clear-galaxy-hub"
+                      onClick={() => setSelectedGalaxyId('')}
+                      className="text-[10px] text-purple-600 dark:text-purple-300 hover:text-purple-800 dark:hover:text-purple-100 transition-colors cursor-pointer"
+                    >
+                      Clear Hub
+                    </button>
+                  )}
+                </div>
               </div>
 
-              <select
-                id="select-star-galaxy"
-                value={selectedGalaxyId}
-                onChange={(e) => {
-                  const newId = e.target.value;
-                  setSelectedGalaxyId(newId);
-                  if (newId) {
-                    const match = allStoredGalaxies.find((g) => g.id === newId);
-                    if (match && match.tag) {
-                      setTags((prev) => Array.from(new Set([...prev, match.tag])));
-                    }
-                  }
-                }}
-                className="w-full bg-white dark:bg-black/60 border border-purple-300 dark:border-purple-500/30 text-purple-950 dark:text-purple-100 text-xs px-3 py-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-400/50 cursor-pointer"
-              >
-                <option value="">✨ None (Publish to Global Universe)</option>
-                {allStoredGalaxies.map((galaxy) => (
-                  <option key={galaxy.id} value={galaxy.id}>
-                    {galaxy.icon} {galaxy.name} ({galaxy.tag}) — {galaxy.membersCount ?? galaxy.memberIds?.length ?? 0} explorers
-                  </option>
-                ))}
-              </select>
+              {!isCreatingCustomGalaxy ? (
+                <div>
+                  <select
+                    id="select-star-galaxy"
+                    value={selectedGalaxyId}
+                    onChange={(e) => {
+                      const newId = e.target.value;
+                      if (newId === '__create_custom_galaxy__') {
+                        setIsCreatingCustomGalaxy(true);
+                        setCustomGalaxyName('');
+                        return;
+                      }
+                      setSelectedGalaxyId(newId);
+                      if (newId) {
+                        const match = allStoredGalaxies.find((g) => g.id === newId);
+                        if (match && match.tag) {
+                          setTags((prev) => Array.from(new Set([...prev, match.tag])));
+                        }
+                      }
+                    }}
+                    className="w-full bg-white dark:bg-black/60 border border-purple-300 dark:border-purple-500/30 text-purple-950 dark:text-purple-100 text-xs px-3 py-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-400/50 cursor-pointer"
+                  >
+                    <option value="">✨ None (Publish to Global Universe)</option>
+                    {allStoredGalaxies.map((galaxy) => (
+                      <option key={galaxy.id} value={galaxy.id}>
+                        {galaxy.icon} {galaxy.name} ({galaxy.tag}) — {galaxy.membersCount ?? galaxy.memberIds?.length ?? 0} explorers
+                      </option>
+                    ))}
+                    <option value="__create_custom_galaxy__" className="text-amber-700 dark:text-amber-300 font-semibold bg-amber-50 dark:bg-[#060e22]">
+                      ✨ + Create New Galaxy...
+                    </option>
+                  </select>
 
-              {selectedGalaxyId && (() => {
-                const sel = allStoredGalaxies.find((g) => g.id === selectedGalaxyId);
-                if (!sel) return null;
-                return (
-                  <div className="mt-2 text-[11px] text-purple-800 dark:text-purple-200/80 flex items-center gap-1.5">
-                    <span className="font-semibold">{sel.icon} {sel.name}:</span>
-                    <span className="truncate">{sel.description}</span>
+                  {selectedGalaxyId && (() => {
+                    const sel = allStoredGalaxies.find((g) => g.id === selectedGalaxyId);
+                    if (!sel) return null;
+                    return (
+                      <div className="mt-2 text-[11px] text-purple-800 dark:text-purple-200/80 flex items-center gap-1.5">
+                        <span className="font-semibold">{sel.icon} {sel.name}:</span>
+                        <span className="truncate">{sel.description}</span>
+                      </div>
+                    );
+                  })()}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="relative flex items-center">
+                    <span className="absolute left-3 text-purple-500 font-semibold text-xs pointer-events-none">🌌</span>
+                    <input
+                      id="input-custom-galaxy-name"
+                      type="text"
+                      value={customGalaxyName}
+                      onChange={(e) => handleCustomGalaxyNameChange(e.target.value)}
+                      placeholder="Enter custom galaxy name..."
+                      autoFocus
+                      className="w-full pl-8 pr-10 py-2.5 bg-white dark:bg-black/60 border border-purple-300 dark:border-purple-400/50 text-purple-950 dark:text-purple-100 text-xs rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-400/50 placeholder-purple-400/60 font-medium"
+                    />
+                    {customGalaxyName && (
+                      <button
+                        type="button"
+                        id="btn-clear-custom-galaxy-input"
+                        onClick={() => handleCustomGalaxyNameChange('')}
+                        className="absolute right-2.5 p-1 rounded-md text-purple-400 hover:text-purple-700 dark:hover:text-purple-200 cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
-                );
-              })()}
+
+                  <div className="flex items-center justify-between text-[11px] px-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-slate-500 dark:text-slate-400 font-medium">Generated Hub Hashtag:</span>
+                      {customGalaxyName.trim() ? (
+                        <span className="font-bold text-amber-600 dark:text-amber-300 px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-400/30 font-mono">
+                          #{customGalaxyName.trim().replace(/^#+/, '').replace(/\s+/g, '')}
+                        </span>
+                      ) : (
+                        <span className="italic text-slate-400">#GalaxyName</span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      id="btn-back-to-existing-galaxies"
+                      onClick={() => {
+                        setIsCreatingCustomGalaxy(false);
+                        setCustomGalaxyName('');
+                      }}
+                      className="text-purple-600 dark:text-purple-400 hover:underline cursor-pointer font-medium"
+                    >
+                      ← Choose from list
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* TAG UNIVERSES (Instagram-style Search & Tag Input) */}

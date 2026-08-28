@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Sparkles,
@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { StarNode, User, Galaxy } from '../types';
 import { getAllRegisteredUsers } from '../utils/userRegistry';
-import { getStoredGalaxies, toggleJoinGalaxy, isUserMemberOfGalaxy } from '../utils/galaxyRegistry';
+import { getStoredGalaxies, toggleJoinGalaxy, isUserMemberOfGalaxy, GALAXY_UPDATE_EVENT } from '../utils/galaxyRegistry';
 import { TERMS } from '../constants/terminology';
 import logoImage from '../assets/images/logo.jpg';
 
@@ -44,6 +44,14 @@ export const DiscoverySidebar: React.FC<DiscoverySidebarProps> = ({
 }) => {
   const [justFollowedIds, setJustFollowedIds] = useState<string[]>([]);
   const [galaxies, setGalaxies] = useState<Galaxy[]>(() => getStoredGalaxies());
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      setGalaxies(getStoredGalaxies());
+    };
+    window.addEventListener(GALAXY_UPDATE_EVENT, handleUpdate);
+    return () => window.removeEventListener(GALAXY_UPDATE_EVENT, handleUpdate);
+  }, []);
 
   // 1. Dynamic Brightest Nebulas (Trending Hashtags derived strictly from actual stars)
   const brightestNebulas = useMemo(() => {

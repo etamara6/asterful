@@ -1,6 +1,7 @@
 import { Galaxy } from '../types/galaxy';
 
-const GALAXY_STORAGE_KEY = 'constellation_galaxies_v1';
+export const GALAXY_STORAGE_KEY = 'asterful_galaxies';
+export const LEGACY_GALAXY_STORAGE_KEY = 'constellation_galaxies_v1';
 
 export const INITIAL_GALAXIES: Galaxy[] = [
   {
@@ -141,7 +142,7 @@ export const GALAXY_UPDATE_EVENT = 'constellation_galaxies_updated';
 
 export function getStoredGalaxies(): Galaxy[] {
   try {
-    const saved = localStorage.getItem(GALAXY_STORAGE_KEY);
+    const saved = localStorage.getItem(GALAXY_STORAGE_KEY) || localStorage.getItem(LEGACY_GALAXY_STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed) && parsed.length > 0) {
@@ -160,21 +161,54 @@ export function getStoredGalaxies(): Galaxy[] {
 
 export function saveGalaxy(galaxy: Galaxy): Galaxy[] {
   const current = getStoredGalaxies();
-  const index = current.findIndex((g) => g.id === galaxy.id);
+  const index = current.findIndex(
+    (g) => g.id === galaxy.id || g.name.toLowerCase() === galaxy.name.toLowerCase()
+  );
   let updated: Galaxy[];
   if (index >= 0) {
     updated = [...current];
-    updated[index] = galaxy;
+    updated[index] = { ...current[index], ...galaxy };
   } else {
     updated = [galaxy, ...current];
   }
   try {
     localStorage.setItem(GALAXY_STORAGE_KEY, JSON.stringify(updated));
+    localStorage.setItem(LEGACY_GALAXY_STORAGE_KEY, JSON.stringify(updated));
     window.dispatchEvent(new Event(GALAXY_UPDATE_EVENT));
   } catch {
     // ignore
   }
   return updated;
+}
+
+export function createOrGetCustomGalaxy(name: string, userId?: string): Galaxy | null {
+  const cleanName = name.trim().replace(/^#+/, '');
+  if (!cleanName) return null;
+
+  const existing = getGalaxyByTagOrName(cleanName);
+  if (existing) return existing;
+
+  const cleanTag = `#${cleanName.replace(/\s+/g, '')}`;
+
+  const newGalaxy: Galaxy = {
+    id: `galaxy-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    name: cleanName,
+    tag: cleanTag,
+    description: `Topic hub for ${cleanName} in the Asterful cosmos.`,
+    icon: '🌌',
+    category: 'General',
+    glowColor: '#FFD700',
+    memberIds: userId ? [userId] : ['guest-explorer'],
+    creatorId: userId || 'guest-explorer',
+    createdAt: new Date().toISOString().split('T')[0],
+    rules: [
+      'Respect fellow explorers in this galaxy.',
+      'Share creative and thoughtful cosmic discoveries.'
+    ]
+  };
+
+  saveGalaxy(newGalaxy);
+  return newGalaxy;
 }
 
 export function toggleJoinGalaxy(galaxyId: string, userId: string): Galaxy[] {
@@ -196,6 +230,7 @@ export function toggleJoinGalaxy(galaxyId: string, userId: string): Galaxy[] {
 
   try {
     localStorage.setItem(GALAXY_STORAGE_KEY, JSON.stringify(updated));
+    localStorage.setItem(LEGACY_GALAXY_STORAGE_KEY, JSON.stringify(updated));
     window.dispatchEvent(new Event(GALAXY_UPDATE_EVENT));
   } catch {
     // ignore
