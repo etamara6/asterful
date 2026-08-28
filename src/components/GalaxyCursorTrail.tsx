@@ -1,5 +1,13 @@
 import React, { useEffect, useRef } from 'react';
 
+interface TrailPoint {
+  x: number;
+  y: number;
+  alpha: number;
+  size: number;
+  color: string;
+}
+
 interface GalaxyParticle {
   x: number;
   y: number;
@@ -15,23 +23,39 @@ interface GalaxyParticle {
   rotSpeed: number;
 }
 
-// Celestial cosmic palette: Starlight Gold, Bright Amber, Cyan, Electric Violet, Nebula Magenta, White Core
+// Celestial cosmic palette: Starlight Gold, Bright Amber, Cyan, Electric Violet, Nebula Magenta, Pure White Core
 const GALAXY_PALETTE = [
   '#FFD700', // Starlight Gold
-  '#FFE600', // Bright Amber Glow
+  '#FFE600', // Amber Glow
   '#00D2D3', // Cosmic Cyan
   '#7D5FFF', // Electric Violet
   '#E056FD', // Nebula Magenta
-  '#FFFFFF', // Pure White Starlight Core
+  '#FFFFFF', // Starlight Core
 ];
 
-// Maximum active particle pool to maintain high star density while bounding memory
-const MAX_PARTICLES = 300;
+// Capped trail length (25-30 max points to strictly bound memory)
+const MAX_TRAIL_POINTS = 28;
+const MAX_PARTICLES = 120;
+const LERP_SMOOTHING = 0.2;
 
 export const GalaxyCursorTrail: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // 1. Mouse Coordinates, Trail Points & Particles live strictly inside useRef (Zero React re-renders)
+  const targetMouseRef = useRef<{ x: number; y: number; isActive: boolean }>({
+    x: 0,
+    y: 0,
+    isActive: false,
+  });
+
+  const renderedMouseRef = useRef<{ x: number; y: number; initialized: boolean }>({
+    x: 0,
+    y: 0,
+    initialized: false,
+  });
+
+  const trailPointsRef = useRef<TrailPoint[]>([]);
   const particlesRef = useRef<GalaxyParticle[]>([]);
-  const lastPosRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -42,8 +66,11 @@ export const GalaxyCursorTrail: React.FC = () => {
 
     let animFrameId = 0;
     let isRunning = true;
+    let isIntersecting = true;
+    let lastRenderTime = performance.now();
+    const FRAME_MIN_TIME = 1000 / 60; // 60 FPS cap
 
-    // Retina Display & High DPI Scaling (capped at 2 for performance on live deployments)
+    // 3. Retina Display & High DPI Scaling (capped at 2 for performance)
     const resizeCanvas = () => {
       if (!canvas || !ctx) return;
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -66,22 +93,20 @@ export const GalaxyCursorTrail: React.FC = () => {
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas, { passive: true });
 
-    // Spawn a particle at exact viewport coordinates without React state
-    const spawnParticleAt = (x: number, y: number, spread = 2.0) => {
+    // Spawn a celestial stardust particle at coordinates without triggering re-renders
+    const spawnParticleAt = (x: number, y: number, spread = 2.5) => {
       const particles = particlesRef.current;
       if (particles.length >= MAX_PARTICLES) {
-        // Fast FIFO drop for fixed memory footprint
-        particles.shift();
+        particles.shift(); // FIFO drop for memory safety
       }
 
       const angle = Math.random() * Math.PI * 2;
-      const speed = 0.2 + Math.random() * 1.1;
+      const speed = 0.25 + Math.random() * 0.95;
       const color = GALAXY_PALETTE[Math.floor(Math.random() * GALAXY_PALETTE.length)];
-      
       const roll = Math.random();
-      const shape: GalaxyParticle['shape'] = roll > 0.5 ? '4-point-star' : roll > 0.2 ? 'circle' : 'sparkle';
-      const initialSize = shape === '4-point-star' ? 1.4 + Math.random() * 2.2 : 0.9 + Math.random() * 1.8;
-      const maxLife = 20 + Math.floor(Math.random() * 14); // ~330ms to 560ms duration
+      const shape: GalaxyParticle['shape'] = roll > 0.55 ? '4-point-star' : roll > 0.25 ? 'circle' : 'sparkle';
+      const initialSize = shape === '4-point-star' ? 1.4 + Math.random() * 2.0 : 0.8 + Math.random() * 1.6;
+      const maxLife = 18 + Math.floor(Math.random() * 12);
 
       particles.push({
         x: x + (Math.random() - 0.5) * spread,
@@ -95,69 +120,46 @@ export const GalaxyCursorTrail: React.FC = () => {
         color,
         shape,
         rotation: Math.random() * Math.PI,
-        rotSpeed: (Math.random() - 0.5) * 0.15,
+        rotSpeed: (Math.random() - 0.5) * 0.12,
       });
     };
 
-    // Sub-segment linear interpolation for continuous celestial trails during fast sweeps
-    const processPointMovement = (currentX: number, currentY: number) => {
-      if (lastPosRef.current) {
-        const lastX = lastPosRef.current.x;
-        const lastY = lastPosRef.current.y;
-        const dx = currentX - lastX;
-        const dy = currentY - lastY;
-        const dist = Math.hypot(dx, dy);
-
-        // Sub-pixel 3.5px steps prevent gaps during rapid circular gestures
-        const stepSize = 3.5;
-        const steps = Math.min(20, Math.max(1, Math.floor(dist / stepSize)));
-
-        for (let i = 1; i <= steps; i++) {
-          const t = i / steps;
-          const interpX = lastX + dx * t;
-          const interpY = lastY + dy * t;
-          spawnParticleAt(interpX, interpY, 2.0);
-        }
-      } else {
-        spawnParticleAt(currentX, currentY, 1.5);
-      }
-
-      lastPosRef.current = { x: currentX, y: currentY };
-
-      // Ensure animation loop is actively running if sleeping
+    // Wake up the requestAnimationFrame loop if currently idle
+    const requestFrameIfNeeded = () => {
       if (!animFrameId && isRunning && !document.hidden && isIntersecting) {
         lastRenderTime = performance.now();
         animFrameId = requestAnimationFrame(render);
       }
     };
 
-    // Native pointer / mouse listeners
+    // 3. Pointer & Mouse Event Listeners with { passive: true } (Zero setState)
     const handlePointerMove = (e: PointerEvent) => {
-      if (typeof e.getCoalescedEvents === 'function') {
-        const coalesced = e.getCoalescedEvents();
-        if (coalesced && coalesced.length > 0) {
-          for (let i = 0; i < coalesced.length; i++) {
-            processPointMovement(coalesced[i].clientX, coalesced[i].clientY);
-          }
-          return;
-        }
-      }
-      processPointMovement(e.clientX, e.clientY);
+      targetMouseRef.current.x = e.clientX;
+      targetMouseRef.current.y = e.clientY;
+      targetMouseRef.current.isActive = true;
+      requestFrameIfNeeded();
     };
 
     const handleMouseMove = (e: MouseEvent) => {
-      processPointMovement(e.clientX, e.clientY);
+      targetMouseRef.current.x = e.clientX;
+      targetMouseRef.current.y = e.clientY;
+      targetMouseRef.current.isActive = true;
+      requestFrameIfNeeded();
     };
 
     const handleTouchMove = (e: TouchEvent) => {
       if (e.touches.length > 0) {
         const touch = e.touches[0];
-        processPointMovement(touch.clientX, touch.clientY);
+        targetMouseRef.current.x = touch.clientX;
+        targetMouseRef.current.y = touch.clientY;
+        targetMouseRef.current.isActive = true;
+        requestFrameIfNeeded();
       }
     };
 
     const handlePointerLeave = () => {
-      lastPosRef.current = null;
+      targetMouseRef.current.isActive = false;
+      renderedMouseRef.current.initialized = false;
     };
 
     window.addEventListener('pointermove', handlePointerMove, { passive: true });
@@ -165,9 +167,9 @@ export const GalaxyCursorTrail: React.FC = () => {
     window.addEventListener('touchmove', handleTouchMove, { passive: true });
     window.addEventListener('pointerleave', handlePointerLeave, { passive: true });
     window.addEventListener('pointerup', handlePointerLeave, { passive: true });
-    document.addEventListener('mouseleave', handlePointerLeave);
+    document.addEventListener('mouseleave', handlePointerLeave, { passive: true });
 
-    // Native 2D Canvas Star Drawing Helper
+    // Native 2D Star Polygon Drawer
     const draw4PointStar = (
       context: CanvasRenderingContext2D,
       cx: number,
@@ -200,12 +202,7 @@ export const GalaxyCursorTrail: React.FC = () => {
       context.fill();
     };
 
-    // 60 FPS Frame Rate Capping (1000ms / 60 = 16.66ms)
-    const FRAME_MIN_TIME = 1000 / 60;
-    let lastRenderTime = performance.now();
-    let isIntersecting = true;
-
-    // Continuous requestAnimationFrame render loop
+    // Main animation and rendering loop
     const render = (now: number) => {
       if (!isRunning || document.hidden || !isIntersecting) {
         animFrameId = 0;
@@ -222,18 +219,104 @@ export const GalaxyCursorTrail: React.FC = () => {
       const width = window.innerWidth;
       const height = window.innerHeight;
 
+      const target = targetMouseRef.current;
+      const rendered = renderedMouseRef.current;
+      const trail = trailPointsRef.current;
       const particles = particlesRef.current;
-      if (particles.length === 0) {
-        // Clear canvas and go to sleep when no active particles
+
+      // 2. Linear Interpolation (Lerp) Smoothing
+      if (target.isActive) {
+        if (!rendered.initialized) {
+          rendered.x = target.x;
+          rendered.y = target.y;
+          rendered.initialized = true;
+        } else {
+          // Lerp trailing point toward target coordinates before drawing
+          rendered.x += (target.x - rendered.x) * LERP_SMOOTHING;
+          rendered.y += (target.y - rendered.y) * LERP_SMOOTHING;
+        }
+
+        // Add trail point when moved
+        const lastPoint = trail[trail.length - 1];
+        const dist = lastPoint ? Math.hypot(rendered.x - lastPoint.x, rendered.y - lastPoint.y) : 999;
+
+        if (dist > 1.2) {
+          trail.push({
+            x: rendered.x,
+            y: rendered.y,
+            alpha: 1.0,
+            size: 3.8,
+            color: GALAXY_PALETTE[Math.floor(Math.random() * GALAXY_PALETTE.length)],
+          });
+
+          // 3. Cap trail array length to max 25-30 points (pops off older points)
+          while (trail.length > MAX_TRAIL_POINTS) {
+            trail.shift();
+          }
+
+          // Subtle sparkling stardust emission
+          if (Math.random() > 0.35) {
+            spawnParticleAt(rendered.x, rendered.y, 2.0);
+          }
+        }
+      }
+
+      // Check if anything is visible to render
+      if (trail.length === 0 && particles.length === 0 && !target.isActive) {
         ctx.clearRect(0, 0, width, height);
         animFrameId = 0;
         return;
       }
 
-      // Clear the canvas on each active frame
+      // Clear frame
       ctx.clearRect(0, 0, width, height);
-      
-      // In-place reverse loop update & draw for high efficiency
+
+      // --- 1. Draw Smooth Glowing Celestial Trail Ribbon ---
+      if (trail.length > 1) {
+        ctx.save();
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        // Draw segmented glowing lines with fading alpha and decreasing width
+        for (let i = 0; i < trail.length - 1; i++) {
+          const p1 = trail[i];
+          const p2 = trail[i + 1];
+          const progress = (i + 1) / trail.length; // 0 (oldest) to 1 (newest)
+          const segmentAlpha = p1.alpha * progress;
+
+          if (segmentAlpha <= 0.01) continue;
+
+          // Outer aura glow
+          ctx.beginPath();
+          ctx.moveTo(p1.x, p1.y);
+          ctx.lineTo(p2.x, p2.y);
+          ctx.strokeStyle = p2.color;
+          ctx.globalAlpha = segmentAlpha * 0.28;
+          ctx.lineWidth = p1.size * progress * 2.8;
+          ctx.stroke();
+
+          // Inner sharp starlight beam
+          ctx.beginPath();
+          ctx.moveTo(p1.x, p1.y);
+          ctx.lineTo(p2.x, p2.y);
+          ctx.strokeStyle = '#FFFFFF';
+          ctx.globalAlpha = segmentAlpha * 0.85;
+          ctx.lineWidth = Math.max(1, p1.size * progress * 0.9);
+          ctx.stroke();
+        }
+
+        ctx.restore();
+      }
+
+      // Trail decay
+      for (let i = trail.length - 1; i >= 0; i--) {
+        trail[i].alpha *= 0.91;
+        if (trail[i].alpha <= 0.03) {
+          trail.splice(i, 1);
+        }
+      }
+
+      // --- 2. Draw Sparkling Star Particles ---
       for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
         p.life -= 1;
@@ -246,39 +329,39 @@ export const GalaxyCursorTrail: React.FC = () => {
         // Particle physics
         p.x += p.vx;
         p.y += p.vy;
-        p.vx *= 0.95;
-        p.vy *= 0.95;
+        p.vx *= 0.96;
+        p.vy *= 0.96;
         p.rotation += p.rotSpeed;
 
         const progress = p.life / p.maxLife;
-        const alpha = Math.min(1, Math.max(0, progress * 1.15));
-        p.size = p.initialSize * (0.35 + 0.65 * progress);
+        const alpha = Math.min(1, Math.max(0, progress * 1.1));
+        p.size = p.initialSize * (0.3 + 0.7 * progress);
 
         ctx.save();
 
         if (p.shape === '4-point-star') {
-          // Native radial aura glow behind sparkle stars
-          const glowGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 3.2);
+          // Radial soft aura
+          const glowGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 3.0);
           glowGrad.addColorStop(0, p.color);
           glowGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
           ctx.globalAlpha = alpha * 0.35;
           ctx.fillStyle = glowGrad;
           ctx.beginPath();
-          ctx.arc(p.x, p.y, p.size * 3.2, 0, Math.PI * 2);
+          ctx.arc(p.x, p.y, p.size * 3.0, 0, Math.PI * 2);
           ctx.fill();
 
-          // Sharp starlight core
+          // Star Core
           ctx.globalAlpha = alpha;
           ctx.fillStyle = p.color;
-          draw4PointStar(ctx, p.x, p.y, 4, p.size * 2.4, p.size * 0.5, p.rotation);
+          draw4PointStar(ctx, p.x, p.y, 4, p.size * 2.2, p.size * 0.5, p.rotation);
         } else if (p.shape === 'sparkle') {
           // Cross sparkle
           ctx.globalAlpha = alpha;
           ctx.fillStyle = p.color;
-          draw4PointStar(ctx, p.x, p.y, 4, p.size * 1.8, p.size * 0.3, p.rotation);
+          draw4PointStar(ctx, p.x, p.y, 4, p.size * 1.7, p.size * 0.3, p.rotation);
         } else {
-          // Glowing celestial orb / stardust with lightweight radial gradient glow
-          const orbGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 2.2);
+          // Glowing celestial orb / stardust
+          const orbGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 2.0);
           orbGrad.addColorStop(0, p.color);
           orbGrad.addColorStop(0.6, p.color);
           orbGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
@@ -286,14 +369,15 @@ export const GalaxyCursorTrail: React.FC = () => {
           ctx.globalAlpha = alpha;
           ctx.fillStyle = orbGrad;
           ctx.beginPath();
-          ctx.arc(p.x, p.y, p.size * 2.2, 0, Math.PI * 2);
+          ctx.arc(p.x, p.y, p.size * 2.0, 0, Math.PI * 2);
           ctx.fill();
         }
 
         ctx.restore();
       }
 
-      if (isRunning && !document.hidden && isIntersecting && particles.length > 0) {
+      // Continue loop if active or lingering
+      if (isRunning && !document.hidden && isIntersecting && (trail.length > 0 || particles.length > 0 || target.isActive)) {
         animFrameId = requestAnimationFrame(render);
       } else {
         animFrameId = 0;
@@ -307,9 +391,8 @@ export const GalaxyCursorTrail: React.FC = () => {
         (entries) => {
           const entry = entries[0];
           isIntersecting = entry ? entry.isIntersecting : true;
-          if (isIntersecting && !document.hidden && isRunning && !animFrameId && particlesRef.current.length > 0) {
-            lastRenderTime = performance.now();
-            animFrameId = requestAnimationFrame(render);
+          if (isIntersecting && !document.hidden && isRunning && !animFrameId) {
+            requestFrameIfNeeded();
           }
         },
         { threshold: 0.05 }
@@ -325,10 +408,7 @@ export const GalaxyCursorTrail: React.FC = () => {
           animFrameId = 0;
         }
       } else {
-        if (isRunning && isIntersecting && !animFrameId && particlesRef.current.length > 0) {
-          lastRenderTime = performance.now();
-          animFrameId = requestAnimationFrame(render);
-        }
+        requestFrameIfNeeded();
       }
     };
 
@@ -371,4 +451,5 @@ export const GalaxyCursorTrail: React.FC = () => {
     />
   );
 };
+
 
