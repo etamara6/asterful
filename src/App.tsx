@@ -15,6 +15,19 @@ import {
   markStoryAsViewed, 
   deleteStarStory 
 } from './utils/storyStorage';
+import {
+  subscribeGlobalStars,
+  subscribeGlobalStories,
+  saveStarToCloud,
+  updateStarInCloud,
+  deleteStarFromCloud,
+  saveStoryToCloud,
+  deleteStoryFromCloud,
+  markStoryViewedInCloud,
+  fetchGlobalCosmosFeed,
+  getCachedStars,
+  getCachedStories
+} from './services/cloudDatabase';
 import { ConstellationCanvas } from './components/ConstellationCanvas';
 import { Header } from './components/Header';
 import { StarDetailDrawer } from './components/StarDetailDrawer';
@@ -104,8 +117,8 @@ export default function App() {
     setIsChatDrawerOpen(true);
   }, []);
 
-  // Star Stories ✨ State (24-Hour Ephemeral Sky)
-  const [stories, setStories] = useState<StarStory[]>(() => getAllStories());
+  // Star Stories ✨ State (24-Hour Ephemeral Sky) with Cloud Sync
+  const [stories, setStories] = useState<StarStory[]>(() => getCachedStories());
   const [isCreateStoryModalOpen, setIsCreateStoryModalOpen] = useState(false);
   const [isStoryViewerModalOpen, setIsStoryViewerModalOpen] = useState(false);
   const [selectedStoryAuthorIndex, setSelectedStoryAuthorIndex] = useState(0);
@@ -166,23 +179,21 @@ export default function App() {
   }, [currentUser, handleOpenAuthModal]);
 
   const handleStoryCreated = useCallback((newStory: StarStory) => {
-    setStories(getAllStories());
+    saveStoryToCloud(newStory, stories);
     setToastNotification(`Star Story ✨ illuminated in your sky!`);
     setTimeout(() => setToastNotification(null), 4000);
-  }, []);
+  }, [stories]);
 
   const handleMarkStoryViewed = useCallback((storyId: string) => {
     if (!currentUser) return;
-    markStoryAsViewed(storyId, currentUser.id);
-    setStories(getAllStories());
-  }, [currentUser]);
+    markStoryViewedInCloud(storyId, currentUser.id, stories);
+  }, [currentUser, stories]);
 
   const handleDeleteStory = useCallback((storyId: string) => {
-    deleteStarStory(storyId, currentUser?.id);
-    setStories(getAllStories());
+    deleteStoryFromCloud(storyId, stories);
     setToastNotification(`Star Story faded from orbit.`);
     setTimeout(() => setToastNotification(null), 4000);
-  }, [currentUser]);
+  }, [stories]);
 
   const handleSendStorySignalReply = useCallback((author: User, text: string) => {
     handleOpenChat(author);
@@ -328,22 +339,35 @@ export default function App() {
     }, 4000);
   }, []);
 
-  // 2. Stars State
-  const [stars, setStars] = useState<StarNode[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved || '[]');
-        if (Array.isArray(parsed)) {
-          return parsed;
-        }
-      }
-    } catch {
-      // ignore parsing errors
-    }
-    return [];
-  });
+  // 2. Stars State with Fast Local-First Cache & Real-Time Cloud Synchronization
+  const [stars, setStars] = useState<StarNode[]>(() => getCachedStars());
 
+  // Global Real-Time Cloud Database Feed & Multiplayer Sync on Load
+  useEffect(() => {
+    // 1. Initial global feed fetch on mount (fetches posts from all accounts across the database)
+    fetchGlobalCosmosFeed().then(({ stars: cloudStars, stories: cloudStories }) => {
+      if (cloudStars && cloudStars.length > 0) {
+        setStars(cloudStars);
+      }
+      if (cloudStories && cloudStories.length > 0) {
+        setStories(cloudStories);
+      }
+    });
+
+    // 2. Real-time multiplayer subscriptions (Firebase onSnapshot / Cross-Tab BroadcastChannel)
+    const unsubscribeStars = subscribeGlobalStars((updatedStars) => {
+      setStars(updatedStars);
+    });
+
+    const unsubscribeStories = subscribeGlobalStories((updatedStories) => {
+      setStories(updatedStories);
+    });
+
+    return () => {
+      unsubscribeStars();
+      unsubscribeStories();
+    };
+  }, []);
 
   const [selectedStarId, setSelectedStarId] = useState<string | null>(null);
   const [activeCluster, setActiveCluster] = useState<StarCluster | 'All'>('All');
@@ -360,16 +384,14 @@ export default function App() {
     const updatedStars = stars.filter((s) => {
       const isAuthorMatch = s.authorId === currentUserId || s.userId === currentUserId;
       const isHandleMatch = s.author.handle.toLowerCase().replace(/^@/, '') === currentUserHandle;
+      if (isAuthorMatch || isHandleMatch) {
+        deleteStarFromCloud(s.id, stars);
+      }
       return !isAuthorMatch && !isHandleMatch;
     });
 
-    // b) Update the stars array in React state and localStorage
+    // b) Update the stars array in React state and cache
     setStars(updatedStars);
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedStars));
-    } catch {
-      // ignore storage errors
-    }
 
     // c) Clear currentUser from state and localStorage to log user out
     setCurrentUser(null);
@@ -653,6 +675,7 @@ export default function App() {
     // Add new star
     updatedStars.push(newStar);
     setStars(updatedStars);
+    saveStarToCloud(newStar, updatedStars);
 
     // Select the new star and focus viewport on it
     setSelectedStarId(newStar.id);
@@ -663,35 +686,34 @@ export default function App() {
     setCustomSpawnPos(null);
   };
 
-  // Handle Like / Unlike Toggle
+  // Handle Like / Unlike Toggle with Cloud Persistence
   const handleLikeStar = useCallback((starId: string) => {
     if (!currentUser || currentUser.isGuest) {
       handleOpenAuthModal('signin', 'Please sign in or create an account to resonate with stars.');
       return;
     }
-    setStars(prev => prev.map(s => {
-      if (s.id === starId) {
-        return toggleStarLike(s, currentUser.id);
-      }
-      return s;
-    }));
-  }, [currentUser, handleOpenAuthModal]);
+    const target = stars.find(s => s.id === starId);
+    if (!target) return;
+    const updated = toggleStarLike(target, currentUser.id);
+    updateStarInCloud(starId, { likes: updated.likes }, stars);
+  }, [currentUser, stars, handleOpenAuthModal]);
 
-  // Handle Reignite (Repost) Toggle
+  // Handle Reignite (Repost) Toggle with Cloud Persistence
   const handleToggleReignite = useCallback((starId: string) => {
     if (!currentUser || currentUser.isGuest) {
       handleOpenAuthModal('signin', 'Please sign in or create an account to reignite stars.');
       return;
     }
-    setStars(prev => prev.map(s => {
-      if (s.id === starId) {
-        return toggleStarReignite(s, currentUser.id);
-      }
-      return s;
-    }));
-  }, [currentUser, handleOpenAuthModal]);
+    const target = stars.find(s => s.id === starId);
+    if (!target) return;
+    const updated = toggleStarReignite(target, currentUser.id);
+    updateStarInCloud(starId, {
+      reignitedBy: updated.reignitedBy,
+      reigniteCount: updated.reigniteCount,
+    }, stars);
+  }, [currentUser, stars, handleOpenAuthModal]);
 
-  // Handle Pin / Unpin as North Star (Limit 3)
+  // Handle Pin / Unpin as North Star (Limit 3) with Cloud Persistence
   const handleTogglePin = useCallback((starId: string) => {
     if (!currentUser) return;
     const currentUserId = currentUser.id;
@@ -726,12 +748,7 @@ export default function App() {
       }
     }
 
-    setStars(prev => prev.map(s => {
-      if (s.id === starId) {
-        return { ...s, isPinned: willBePinned };
-      }
-      return s;
-    }));
+    updateStarInCloud(starId, { isPinned: willBePinned }, stars);
 
     setToastNotification(willBePinned ? 'Pinned as North Star ⭐' : 'Unpinned from North Star ⭐');
     setTimeout(() => setToastNotification(null), 3000);
@@ -746,22 +763,16 @@ export default function App() {
     setIsCreateModalOpen(true);
   }, []);
 
-  // Handle Update Reformed Star
+  // Handle Update Reformed Star with Cloud Persistence
   const handleUpdateStar = useCallback((starId: string, updatedData: Partial<StarNode>) => {
-    setStars(prev => prev.map(s => {
-      if (s.id === starId) {
-        return {
-          ...s,
-          ...updatedData,
-          isReformed: true,
-          reformedAt: 'Just now',
-        };
-      }
-      return s;
-    }));
+    updateStarInCloud(starId, {
+      ...updatedData,
+      isReformed: true,
+      reformedAt: 'Just now',
+    }, stars);
     setToastNotification('Star reformed successfully ⭐');
     setTimeout(() => setToastNotification(null), 3500);
-  }, []);
+  }, [stars]);
 
   // Handle Resume Unlit Star Draft
   const handleResumeDraft = useCallback((draft: UnlitStarDraft) => {
@@ -772,13 +783,13 @@ export default function App() {
     setIsCreateModalOpen(true);
   }, []);
 
-  // Handle Delete
+  // Handle Delete with Cloud Persistence
   const handleDeleteStar = useCallback((starId: string) => {
-    setStars(prev => prev.filter(s => s.id !== starId));
+    deleteStarFromCloud(starId, stars);
     if (selectedStarId === starId) {
       setSelectedStarId(null);
     }
-  }, [selectedStarId]);
+  }, [selectedStarId, stars]);
 
   // Tag Click (opens Nebula modal and highlights tag)
   const handleTagClick = useCallback((tag: string) => {

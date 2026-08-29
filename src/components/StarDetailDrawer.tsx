@@ -387,8 +387,26 @@ export const StarDetailDrawer: React.FC<StarDetailDrawerProps> = ({
 
         {/* Drawer Scrollable Content */}
         <div className="flex-1 overflow-y-auto px-5 py-5 space-y-6 text-slate-800 dark:text-slate-200 custom-scrollbar">
-          {/* Metadata Badges (Cluster + Visibility) */}
+          {/* Metadata Badges (Cluster + Visibility + Author Status) */}
           <div className="flex flex-wrap items-center gap-2">
+            {isSelf ? (
+              <span
+                id={`drawer-badge-author-self-${star.id}`}
+                className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full border bg-sky-100 dark:bg-sky-500/20 text-sky-900 dark:text-sky-200 border-sky-300 dark:border-sky-400/50 shadow-xs"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-sky-600 dark:text-sky-300" />
+                <span>Your Star ✨</span>
+              </span>
+            ) : (
+              <span
+                id={`drawer-badge-author-other-${star.id}`}
+                className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-full border bg-indigo-50 dark:bg-indigo-500/15 text-indigo-900 dark:text-indigo-200 border-indigo-200 dark:border-indigo-400/30 shadow-xs"
+              >
+                <Orbit className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                <span>Cosmic Explorer 🌟</span>
+              </span>
+            )}
+
             {star.isPinned && (
               <span
                 id={`drawer-badge-north-star-${star.id}`}

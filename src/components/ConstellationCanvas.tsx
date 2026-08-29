@@ -620,6 +620,13 @@ export const ConstellationCanvas: React.FC<ConstellationCanvasProps> = ({
         const isConnected = connectedStarIds.has(star.id);
         const matchesFilter = isMatching(star);
         const isFriend = isStarFriend(star, currentUser || null);
+        const isMyStar = Boolean(
+          currentUser && (
+            (star.authorId && star.authorId === currentUser.id) ||
+            (star.userId && star.userId === currentUser.id) ||
+            (star.author?.handle && star.author.handle.toLowerCase().replace(/^@/, '') === currentUser.handle.toLowerCase().replace(/^@/, ''))
+          )
+        );
 
         let nodeAlpha = 1.0;
         if (selectedStarId) {
@@ -645,11 +652,13 @@ export const ConstellationCanvas: React.FC<ConstellationCanvasProps> = ({
           : DEFAULT_UNIVERSE_GLOW;
 
         const clusterTheme = CLUSTER_THEMES[star.cluster] || CLUSTER_THEMES['Digital Art'];
-        const glowColor = isFriend
-          ? (isDark ? '#FFD700' : '#D97706')
-          : (starUniverses.length === 1
-              ? (activeUniv?.glowColor || star.glowColor || resolvedUniverseGlow || clusterTheme.color || '#FFC300')
-              : '#FFC300');
+        const glowColor = isMyStar
+          ? (isDark ? '#38BDF8' : '#0284C7')
+          : (isFriend
+              ? (isDark ? '#FFD700' : '#D97706')
+              : (starUniverses.length === 1
+                  ? (activeUniv?.glowColor || star.glowColor || resolvedUniverseGlow || clusterTheme.color || '#FFC300')
+                  : '#FFC300'));
 
         const pulseFactor = Math.sin(now * 0.0025 + pos.x * 0.01) * 0.12 + 1;
         const baseRadius = star.radius;
@@ -660,22 +669,36 @@ export const ConstellationCanvas: React.FC<ConstellationCanvasProps> = ({
         ctx.shadowColor = glowColor;
         ctx.shadowBlur = 14;
 
-        // Multi-Layered Soft Golden Radial Halo Glows
-        const glowRadius = currentRadius * (isSelected ? 3.8 : (isHovered ? 3.0 : (isFriend ? 2.8 : 2.2)));
+        // Multi-Layered Soft Golden / Cyan Radial Halo Glows
+        const glowRadius = currentRadius * (isSelected ? 3.8 : (isHovered ? 3.0 : (isMyStar ? 3.2 : (isFriend ? 2.8 : 2.2))));
         const glowGrad = ctx.createRadialGradient(
           pos.x, pos.y, currentRadius * 0.15,
           pos.x, pos.y, glowRadius
         );
         if (isDark) {
-          glowGrad.addColorStop(0, isFriend ? 'rgba(255, 215, 0, 0.55)' : 'rgba(255, 215, 0, 0.35)');
-          glowGrad.addColorStop(0.35, hexToRgba(glowColor, isSelected ? 0.45 : (isHovered ? 0.35 : (isFriend ? 0.28 : 0.18))));
-          glowGrad.addColorStop(0.7, isFriend ? 'rgba(255, 229, 127, 0.12)' : 'rgba(255, 229, 127, 0.05)');
-          glowGrad.addColorStop(1, 'rgba(2, 7, 19, 0)');
+          if (isMyStar) {
+            glowGrad.addColorStop(0, 'rgba(56, 189, 248, 0.65)');
+            glowGrad.addColorStop(0.35, 'rgba(14, 165, 233, 0.35)');
+            glowGrad.addColorStop(0.7, 'rgba(56, 189, 248, 0.12)');
+            glowGrad.addColorStop(1, 'rgba(2, 7, 19, 0)');
+          } else {
+            glowGrad.addColorStop(0, isFriend ? 'rgba(255, 215, 0, 0.55)' : 'rgba(255, 215, 0, 0.35)');
+            glowGrad.addColorStop(0.35, hexToRgba(glowColor, isSelected ? 0.45 : (isHovered ? 0.35 : (isFriend ? 0.28 : 0.18))));
+            glowGrad.addColorStop(0.7, isFriend ? 'rgba(255, 229, 127, 0.12)' : 'rgba(255, 229, 127, 0.05)');
+            glowGrad.addColorStop(1, 'rgba(2, 7, 19, 0)');
+          }
         } else {
-          glowGrad.addColorStop(0, isFriend ? 'rgba(217, 119, 6, 0.45)' : 'rgba(217, 119, 6, 0.28)');
-          glowGrad.addColorStop(0.35, hexToRgba(glowColor, isSelected ? 0.35 : (isHovered ? 0.28 : (isFriend ? 0.22 : 0.15))));
-          glowGrad.addColorStop(0.7, isFriend ? 'rgba(245, 158, 11, 0.10)' : 'rgba(245, 158, 11, 0.04)');
-          glowGrad.addColorStop(1, 'rgba(244, 245, 250, 0)');
+          if (isMyStar) {
+            glowGrad.addColorStop(0, 'rgba(2, 132, 199, 0.55)');
+            glowGrad.addColorStop(0.35, 'rgba(14, 165, 233, 0.30)');
+            glowGrad.addColorStop(0.7, 'rgba(56, 189, 248, 0.10)');
+            glowGrad.addColorStop(1, 'rgba(244, 245, 250, 0)');
+          } else {
+            glowGrad.addColorStop(0, isFriend ? 'rgba(217, 119, 6, 0.45)' : 'rgba(217, 119, 6, 0.28)');
+            glowGrad.addColorStop(0.35, hexToRgba(glowColor, isSelected ? 0.35 : (isHovered ? 0.28 : (isFriend ? 0.22 : 0.15))));
+            glowGrad.addColorStop(0.7, isFriend ? 'rgba(245, 158, 11, 0.10)' : 'rgba(245, 158, 11, 0.04)');
+            glowGrad.addColorStop(1, 'rgba(244, 245, 250, 0)');
+          }
         }
 
         ctx.fillStyle = glowGrad;
@@ -683,22 +706,34 @@ export const ConstellationCanvas: React.FC<ConstellationCanvasProps> = ({
         ctx.arc(pos.x, pos.y, glowRadius, 0, Math.PI * 2);
         ctx.fill();
 
+        // Distinctive Author Orbital Ring for User-Authored Stars
+        if (isMyStar) {
+          ctx.save();
+          ctx.strokeStyle = isDark ? 'rgba(56, 189, 248, 0.75)' : 'rgba(2, 132, 199, 0.8)';
+          ctx.lineWidth = 1.2 / Math.max(0.5, vp.zoom);
+          ctx.setLineDash([2 / Math.max(0.5, vp.zoom), 2 / Math.max(0.5, vp.zoom)]);
+          ctx.beginPath();
+          ctx.arc(pos.x, pos.y, currentRadius * 1.75, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
+
         // 4-Point Celestial Starburst Diffraction Spikes
-        const isBrightStar = baseRadius >= 9.5 || isSelected || isHovered || star.remixCount >= 2 || isFriend;
+        const isBrightStar = baseRadius >= 9.5 || isSelected || isHovered || star.remixCount >= 2 || isFriend || isMyStar;
         if (isBrightStar) {
-          const flareLength = currentRadius * (isSelected ? 4.2 : (isHovered ? 3.5 : (isFriend ? 3.2 : 2.8)));
-          const flareWidth = (isSelected ? 2.0 : (isFriend ? 1.5 : 1.2)) / Math.max(0.5, vp.zoom);
+          const flareLength = currentRadius * (isSelected ? 4.2 : (isHovered ? 3.5 : (isMyStar ? 3.6 : (isFriend ? 3.2 : 2.8))));
+          const flareWidth = (isSelected ? 2.0 : (isMyStar ? 1.6 : (isFriend ? 1.5 : 1.2))) / Math.max(0.5, vp.zoom);
 
           ctx.save();
           // Horizontal & Vertical Primary Rays
           const flareGradH = ctx.createLinearGradient(pos.x - flareLength, pos.y, pos.x + flareLength, pos.y);
           if (isDark) {
             flareGradH.addColorStop(0, 'rgba(255, 223, 128, 0)');
-            flareGradH.addColorStop(0.5, isSelected ? '#ffffff' : 'rgba(255, 248, 225, 0.9)');
+            flareGradH.addColorStop(0.5, isSelected ? '#ffffff' : (isMyStar ? '#BAE6FD' : 'rgba(255, 248, 225, 0.9)'));
             flareGradH.addColorStop(1, 'rgba(255, 223, 128, 0)');
           } else {
             flareGradH.addColorStop(0, 'rgba(217, 119, 6, 0)');
-            flareGradH.addColorStop(0.5, isSelected ? '#ffffff' : 'rgba(217, 119, 6, 0.85)');
+            flareGradH.addColorStop(0.5, isSelected ? '#ffffff' : (isMyStar ? '#0284C7' : 'rgba(217, 119, 6, 0.85)'));
             flareGradH.addColorStop(1, 'rgba(217, 119, 6, 0)');
           }
 
@@ -712,11 +747,11 @@ export const ConstellationCanvas: React.FC<ConstellationCanvasProps> = ({
           const flareGradV = ctx.createLinearGradient(pos.x, pos.y - flareLength, pos.x, pos.y + flareLength);
           if (isDark) {
             flareGradV.addColorStop(0, 'rgba(255, 223, 128, 0)');
-            flareGradV.addColorStop(0.5, isSelected ? '#ffffff' : 'rgba(255, 248, 225, 0.9)');
+            flareGradV.addColorStop(0.5, isSelected ? '#ffffff' : (isMyStar ? '#BAE6FD' : 'rgba(255, 248, 225, 0.9)'));
             flareGradV.addColorStop(1, 'rgba(255, 223, 128, 0)');
           } else {
             flareGradV.addColorStop(0, 'rgba(217, 119, 6, 0)');
-            flareGradV.addColorStop(0.5, isSelected ? '#ffffff' : 'rgba(217, 119, 6, 0.85)');
+            flareGradV.addColorStop(0.5, isSelected ? '#ffffff' : (isMyStar ? '#0284C7' : 'rgba(217, 119, 6, 0.85)'));
             flareGradV.addColorStop(1, 'rgba(217, 119, 6, 0)');
           }
 
@@ -727,9 +762,11 @@ export const ConstellationCanvas: React.FC<ConstellationCanvasProps> = ({
           ctx.stroke();
 
           // Soft diagonal secondary flares for selected/extra bright/friend stars
-          if (isSelected || isHovered || baseRadius >= 11 || (isFriend && baseRadius >= 8)) {
+          if (isSelected || isHovered || isMyStar || baseRadius >= 11 || (isFriend && baseRadius >= 8)) {
             const diagLen = flareLength * 0.55;
-            ctx.strokeStyle = isDark ? 'rgba(255, 223, 128, 0.35)' : 'rgba(217, 119, 6, 0.35)';
+            ctx.strokeStyle = isDark 
+              ? (isMyStar ? 'rgba(56, 189, 248, 0.4)' : 'rgba(255, 223, 128, 0.35)') 
+              : (isMyStar ? 'rgba(2, 132, 199, 0.4)' : 'rgba(217, 119, 6, 0.35)');
             ctx.lineWidth = flareWidth * 0.7;
             ctx.beginPath();
             ctx.moveTo(pos.x - diagLen * 0.7, pos.y - diagLen * 0.7);
@@ -813,11 +850,12 @@ export const ConstellationCanvas: React.FC<ConstellationCanvasProps> = ({
           ctx.textBaseline = 'top';
 
           const labelY = pos.y + currentRadius + (6 / Math.max(0.5, vp.zoom));
+          const rawTitle = isMyStar ? `✦ ${star.title}` : star.title;
           const title = star.isNsfw
-            ? `🔞 ${star.title.length > 20 ? star.title.substring(0, 18) + '…' : star.title}`
-            : (star.title.length > 24 ? star.title.substring(0, 22) + '…' : star.title);
+            ? `🔞 ${rawTitle.length > 20 ? rawTitle.substring(0, 18) + '…' : rawTitle}`
+            : (rawTitle.length > 24 ? rawTitle.substring(0, 22) + '…' : rawTitle);
 
-          // Pill Background with deep indigo & golden/rose border in dark mode, or crisp starlight white in light mode
+          // Pill Background with deep indigo & golden/rose/cyan border
           const textMetrics = ctx.measureText(title);
           const bgPaddingH = 6 / Math.max(0.5, vp.zoom);
           const bgHeight = 16 / Math.max(0.5, vp.zoom);
@@ -825,14 +863,14 @@ export const ConstellationCanvas: React.FC<ConstellationCanvasProps> = ({
 
           if (isDark) {
             ctx.fillStyle = isSelected 
-              ? (star.isNsfw ? 'rgba(24, 6, 12, 0.94)' : 'rgba(6, 14, 32, 0.92)')
-              : (star.isNsfw ? 'rgba(20, 4, 10, 0.85)' : 'rgba(3, 8, 20, 0.82)');
+              ? (star.isNsfw ? 'rgba(24, 6, 12, 0.94)' : (isMyStar ? 'rgba(8, 28, 48, 0.94)' : 'rgba(6, 14, 32, 0.92)'))
+              : (star.isNsfw ? 'rgba(20, 4, 10, 0.85)' : (isMyStar ? 'rgba(4, 20, 36, 0.88)' : 'rgba(3, 8, 20, 0.82)'));
             ctx.strokeStyle = isSelected 
-              ? (star.isNsfw ? 'rgba(244, 63, 94, 0.85)' : 'rgba(255, 215, 0, 0.7)')
-              : (star.isNsfw ? 'rgba(244, 63, 94, 0.45)' : (isFriend ? 'rgba(255, 215, 0, 0.55)' : 'rgba(255, 223, 128, 0.25)'));
+              ? (star.isNsfw ? 'rgba(244, 63, 94, 0.85)' : (isMyStar ? 'rgba(56, 189, 248, 0.9)' : 'rgba(255, 215, 0, 0.7)'))
+              : (star.isNsfw ? 'rgba(244, 63, 94, 0.45)' : (isMyStar ? 'rgba(56, 189, 248, 0.65)' : (isFriend ? 'rgba(255, 215, 0, 0.55)' : 'rgba(255, 223, 128, 0.25)')));
           } else {
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
-            ctx.strokeStyle = '#64748B';
+            ctx.fillStyle = isMyStar ? '#F0F9FF' : 'rgba(255, 255, 255, 0.95)';
+            ctx.strokeStyle = isMyStar ? '#0284C7' : '#64748B';
           }
           ctx.lineWidth = 1 / Math.max(0.5, vp.zoom);
 
@@ -848,9 +886,9 @@ export const ConstellationCanvas: React.FC<ConstellationCanvasProps> = ({
           if (isDark) {
             ctx.fillStyle = star.isNsfw 
               ? (isSelected ? '#FDA4AF' : (isHovered ? '#FECDD3' : '#F43F5E'))
-              : (isSelected ? '#FFE57F' : (isHovered ? '#FFFFFF' : (isFriend ? '#FFF8E1' : '#E2E8F0')));
+              : (isSelected ? '#FFE57F' : (isHovered ? '#FFFFFF' : (isMyStar ? '#BAE6FD' : (isFriend ? '#FFF8E1' : '#E2E8F0'))));
           } else {
-            ctx.fillStyle = '#0F172A';
+            ctx.fillStyle = isMyStar ? '#0369A1' : '#0F172A';
           }
           ctx.fillText(title, pos.x, labelY);
         }
