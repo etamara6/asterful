@@ -248,6 +248,80 @@ export async function updateUserInCloud(userId: string, updates: Partial<User>):
   }
 }
 
+export async function checkUserUniquenessInCloud(params: {
+  email?: string;
+  username?: string;
+  handle?: string;
+  displayName?: string;
+  excludeUserId?: string;
+}): Promise<{ isUnique: boolean; field?: 'email' | 'username' | 'handle' | 'displayName'; error?: string }> {
+  const normEmail = (params.email || '').trim().toLowerCase();
+  const normUsername = (params.username || '').trim().toLowerCase().replace(/^@/, '');
+  const normHandle = (params.handle || '').trim().toLowerCase().replace(/^@/, '');
+  const normDisplayName = (params.displayName || '').trim().toLowerCase();
+
+  // 1. Check local cache first
+  const localUsers = getCachedUsers();
+  for (const u of localUsers) {
+    if (params.excludeUserId && u.id === params.excludeUserId) continue;
+
+    const uEmail = (u.email || '').trim().toLowerCase();
+    const uUsername = (u.username || '').trim().toLowerCase().replace(/^@/, '');
+    const uHandle = (u.handle || '').trim().toLowerCase().replace(/^@/, '');
+    const uDisplayName = (u.displayName || '').trim().toLowerCase();
+
+    if (normEmail && uEmail && uEmail === normEmail) {
+      return { isUnique: false, field: 'email', error: 'An account with this email address already exists. Please sign in.' };
+    }
+    if (normHandle && ((uHandle && uHandle === normHandle) || (uUsername && uUsername === normHandle))) {
+      return { isUnique: false, field: 'handle', error: `The username @${params.handle?.replace(/^@/, '')} is already taken. Please choose another.` };
+    }
+    if (normUsername && ((uUsername && uUsername === normUsername) || (uHandle && uHandle === normUsername))) {
+      return { isUnique: false, field: 'username', error: `The username @${params.username?.replace(/^@/, '')} is already taken. Please choose another.` };
+    }
+    if (normDisplayName && uDisplayName && uDisplayName === normDisplayName) {
+      return { isUnique: false, field: 'displayName', error: 'This Display Name is already taken. Please choose a unique Display Name.' };
+    }
+  }
+
+  // 2. Query Firestore Database directly
+  const db = getFirebaseFirestore();
+  if (db) {
+    try {
+      const usersCol = collection(db, 'users');
+      const snapshot = await getDocs(usersCol);
+      for (const docSnap of snapshot.docs) {
+        const u = docSnap.data() as User;
+        if (!u) continue;
+        const uId = u.id || docSnap.id;
+        if (params.excludeUserId && uId === params.excludeUserId) continue;
+
+        const uEmail = (u.email || '').trim().toLowerCase();
+        const uUsername = (u.username || '').trim().toLowerCase().replace(/^@/, '');
+        const uHandle = (u.handle || '').trim().toLowerCase().replace(/^@/, '');
+        const uDisplayName = (u.displayName || '').trim().toLowerCase();
+
+        if (normEmail && uEmail && uEmail === normEmail) {
+          return { isUnique: false, field: 'email', error: 'An account with this email address already exists. Please sign in.' };
+        }
+        if (normHandle && ((uHandle && uHandle === normHandle) || (uUsername && uUsername === normHandle))) {
+          return { isUnique: false, field: 'handle', error: `The username @${params.handle?.replace(/^@/, '')} is already taken. Please choose another.` };
+        }
+        if (normUsername && ((uUsername && uUsername === normUsername) || (uHandle && uHandle === normUsername))) {
+          return { isUnique: false, field: 'username', error: `The username @${params.username?.replace(/^@/, '')} is already taken. Please choose another.` };
+        }
+        if (normDisplayName && uDisplayName && uDisplayName === normDisplayName) {
+          return { isUnique: false, field: 'displayName', error: 'This Display Name is already taken. Please choose a unique Display Name.' };
+        }
+      }
+    } catch (err) {
+      console.warn('[Firebase] checkUserUniquenessInCloud query error:', err);
+    }
+  }
+
+  return { isUnique: true };
+}
+
 export async function findUserInCloud(identifier: string): Promise<User | null> {
   const normalized = identifier.trim().toLowerCase().replace(/^@/, '');
   if (!normalized) return null;

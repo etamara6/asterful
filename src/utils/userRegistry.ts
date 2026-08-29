@@ -4,9 +4,12 @@ import {
   saveUserToCloud, 
   updateUserInCloud, 
   findUserInCloud, 
+  checkUserUniquenessInCloud,
   getCachedUsers, 
   cacheUsers 
 } from '../services/cloudDatabase';
+
+export { checkUserUniquenessInCloud };
 
 export const REGISTERED_USERS_KEY = 'asterful_registered_users';
 export const LEGACY_REGISTERED_USERS_KEY = 'constellation_registered_users_v1';
@@ -257,8 +260,55 @@ export function isEmailOrUsernameTaken(identifierToTest: string, excludeUserId?:
   });
 }
 
+export interface RegisterResult {
+  success: boolean;
+  user?: User;
+  error?: string;
+  field?: 'email' | 'username' | 'handle' | 'displayName';
+}
+
 /**
- * Saves a newly registered user to the persistent registry in localStorage and Cloud Firestore.
+ * Asynchronously registers a new user after verifying database uniqueness in Firestore and local cache.
+ * Blocks duplicate email, username/handle, and display name across all accounts.
+ */
+export async function registerUserAsync(user: User): Promise<RegisterResult> {
+  if (!user || user.isGuest) {
+    return { success: false, error: 'Invalid user registration payload.' };
+  }
+
+  const email = (user.email || '').trim().toLowerCase();
+  const username = (user.username || '').trim().toLowerCase().replace(/^@/, '');
+  const handle = (user.handle || '').trim().toLowerCase().replace(/^@/, '');
+  const displayName = (user.displayName || '').trim();
+
+  // 1. Database & Cache uniqueness check
+  const uniquenessCheck = await checkUserUniquenessInCloud({
+    email,
+    username,
+    handle,
+    displayName,
+    excludeUserId: user.id,
+  });
+
+  if (!uniquenessCheck.isUnique) {
+    return {
+      success: false,
+      field: uniquenessCheck.field,
+      error: uniquenessCheck.error || 'An account with these credentials already exists in the database.',
+    };
+  }
+
+  // 2. Persist to local cache and Cloud Firestore
+  registerUser(user);
+
+  return {
+    success: true,
+    user,
+  };
+}
+
+/**
+ * Saves a newly registered or updated user to the persistent registry in localStorage and Cloud Firestore.
  */
 export function registerUser(user: User): void {
   if (!user || user.isGuest) return;

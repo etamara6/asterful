@@ -44,7 +44,7 @@ import {
 import { User, StarNode, StarCluster, UnlitStarDraft, ExplorerRole } from '../types';
 import { DEFAULT_COSMIC_AVATAR, getClusterTheme } from '../utils/colorPalette';
 import { FormattedText } from './FormattedText';
-import { isDisplayNameTaken, isUsernameTaken, generateCleanHandle, registerUser, toggleFollowUser, getAllRegisteredUsers } from '../utils/userRegistry';
+import { isDisplayNameTaken, isUsernameTaken, generateCleanHandle, registerUser, toggleFollowUser, getAllRegisteredUsers, checkUserUniquenessInCloud } from '../utils/userRegistry';
 import { getStarLikesCount } from '../utils/likesHelper';
 import { isStarReignitedByUser, getStarReigniteCount } from '../utils/reigniteHelper';
 import { getStoredDrafts, deleteDraft } from '../utils/draftStorage';
@@ -573,26 +573,22 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       return;
     }
 
-    // Check uniqueness if display name changed
-    const currentName = (currentUser.displayName || currentUser.username || '').trim().toLowerCase();
-    if (trimmedName.toLowerCase() !== currentName) {
-      if (isDisplayNameTaken(trimmedName, currentUser.id)) {
-        setEditError(`The display name "${trimmedName}" is already claimed in the cosmos.`);
-        return;
-      }
-    }
-
-    // Check uniqueness if handle/username changed
-    const currentNormalizedUsername = generateCleanHandle(currentUser.username || currentUser.handle || '');
-    if (cleanNewUsername.toLowerCase() !== currentNormalizedUsername.toLowerCase()) {
-      if (isUsernameTaken(cleanNewUsername, currentUser.id)) {
-        setEditError(`The handle @${cleanNewUsername} is already taken in the cosmos.`);
-        return;
-      }
-    }
-
     setIsSaving(true);
     setEditError('');
+
+    // Check uniqueness across Firestore Cloud Database and local storage
+    const uniquenessCheck = await checkUserUniquenessInCloud({
+      displayName: trimmedName,
+      handle: cleanNewUsername,
+      username: cleanNewUsername,
+      excludeUserId: currentUser.id,
+    });
+
+    if (!uniquenessCheck.isUnique) {
+      setIsSaving(false);
+      setEditError(uniquenessCheck.error || 'This display name or handle is already taken in the cosmos.');
+      return;
+    }
 
     try {
       const finalQuote = trimmedQuote || DEFAULT_COSMIC_QUOTE;

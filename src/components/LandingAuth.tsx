@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Compass, Eye, EyeOff, Camera, Trash2, AlertCircle, Calendar, ShieldCheck, Mail, ArrowLeft, Sparkles, CheckCircle2, KeyRound, Lock } from 'lucide-react';
 import { User } from '../types';
 import { DEFAULT_COSMIC_AVATAR } from '../utils/colorPalette';
-import { getAllRegisteredUsers, isDisplayNameTaken, isEmailTaken, isUsernameTaken, generateCleanHandle, registerUser, validateUserCredentials, validateUserCredentialsAsync, findUserByEmail, findUserByIdentifier, updateUserPassword } from '../utils/userRegistry';
+import { getAllRegisteredUsers, isDisplayNameTaken, isEmailTaken, isUsernameTaken, generateCleanHandle, registerUser, registerUserAsync, checkUserUniquenessInCloud, validateUserCredentials, validateUserCredentialsAsync, findUserByEmail, findUserByIdentifier, updateUserPassword } from '../utils/userRegistry';
 import bgImage from '../assets/images/constellation.jpg';
 import logoImage from '../assets/images/logo.jpg';
 
@@ -126,11 +126,12 @@ export const LandingAuth: React.FC<LandingAuthProps> = ({ onAuthSuccess }) => {
     onAuthSuccess(validUser);
   };
 
-  const handleRegister = (e?: React.FormEvent) => {
+  const handleRegister = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setErrorMsg('');
     setPasswordError('');
     setDisplayNameError('');
+    setHandleError('');
     setHasAuthError(false);
 
     const identifier = emailOrUsername.trim();
@@ -148,31 +149,7 @@ export const LandingAuth: React.FC<LandingAuthProps> = ({ onAuthSuccess }) => {
     const trimmedDisplayName = displayName.trim();
     if (!trimmedDisplayName) {
       setErrorMsg('Please enter your Display Name.');
-      return;
-    }
-
-    const existingUsers = getAllRegisteredUsers();
-
-    // 1. Strict Unique Email Check
-    const emailToTest = identifier.includes('@') ? identifier.toLowerCase() : `${generateCleanHandle(identifier)}@asterful.space`;
-    const emailExists = existingUsers.some(
-      (u) => (u.email && (u.email.trim().toLowerCase() === identifier.toLowerCase() || u.email.trim().toLowerCase() === emailToTest))
-    );
-    if (emailExists) {
-      const errorText = 'You already have an account linked to this email. Please sign in.';
-      setErrorMsg(errorText);
-      setHasAuthError(true);
-      return;
-    }
-
-    // 2. Strict Unique Display Name Check
-    const displayNameExists = existingUsers.some(
-      (u) => u.displayName && u.displayName.trim().toLowerCase() === trimmedDisplayName.toLowerCase()
-    );
-    if (displayNameExists) {
-      const errorText = 'This Display Name is already taken. Please choose another.';
-      setDisplayNameError(errorText);
-      setErrorMsg(errorText);
+      setDisplayNameError('Please enter your Display Name.');
       return;
     }
 
@@ -188,7 +165,7 @@ export const LandingAuth: React.FC<LandingAuthProps> = ({ onAuthSuccess }) => {
     }
     const isOver18 = parsedAge >= 18;
 
-    // 3. Custom / Optional Username Validation
+    // Custom / Optional Username Validation
     let cleanHandle = '';
     const rawHandle = handle.trim();
     if (rawHandle) {
@@ -199,46 +176,74 @@ export const LandingAuth: React.FC<LandingAuthProps> = ({ onAuthSuccess }) => {
         setErrorMsg(err);
         return;
       }
-      if (isUsernameTaken(cleanHandle)) {
-        const err = `Username @${cleanHandle} is already taken.`;
-        setHandleError(err);
-        setErrorMsg(err);
-        return;
-      }
     } else {
       cleanHandle = generateCleanHandle(identifier);
     }
 
+    const targetEmail = identifier.includes('@') ? identifier.toLowerCase() : `${cleanHandle}@constellation.space`;
+
     setIsLoading(true);
-    setTimeout(() => {
-      const user: User = {
-        id: `user-${Date.now()}`,
-        email: identifier.includes('@') ? identifier : `${cleanHandle}@constellation.space`,
-        displayName: trimmedDisplayName,
-        username: cleanHandle,
-        handle: cleanHandle,
-        password: password.trim(),
-        avatarUrl: avatarDataUrl || DEFAULT_COSMIC_AVATAR,
-        joinedAt: new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
-        glowColor: '#FFD700',
-        age: parsedAge,
-        isOver18,
-      };
 
-      // Persist newly registered user to registry
-      registerUser(user);
+    // 1. Query Firestore Database to ensure account uniqueness
+    const uniquenessCheck = await checkUserUniquenessInCloud({
+      email: targetEmail,
+      displayName: trimmedDisplayName,
+      handle: cleanHandle,
+      username: cleanHandle,
+    });
 
-      // Persist session immediately to local storage
-      try {
-        localStorage.setItem('asterful_auth_user_v2', JSON.stringify(user));
-        localStorage.setItem('constellation_auth_user_v1', JSON.stringify(user));
-      } catch {
-        // ignore
-      }
-
+    if (!uniquenessCheck.isUnique) {
       setIsLoading(false);
-      onAuthSuccess(user);
-    }, 400);
+      setHasAuthError(true);
+      const errMsg = uniquenessCheck.error || 'An account with this email or username already exists.';
+      if (uniquenessCheck.field === 'email') {
+        setErrorMsg(errMsg);
+      } else if (uniquenessCheck.field === 'displayName') {
+        setDisplayNameError(errMsg);
+        setErrorMsg(errMsg);
+      } else if (uniquenessCheck.field === 'handle' || uniquenessCheck.field === 'username') {
+        setHandleError(errMsg);
+        setErrorMsg(errMsg);
+      } else {
+        setErrorMsg(errMsg);
+      }
+      return;
+    }
+
+    const user: User = {
+      id: `user-${cleanHandle}-${Date.now()}`,
+      email: targetEmail,
+      displayName: trimmedDisplayName,
+      username: cleanHandle,
+      handle: cleanHandle,
+      password: password.trim(),
+      avatarUrl: avatarDataUrl || DEFAULT_COSMIC_AVATAR,
+      joinedAt: new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+      glowColor: '#FFD700',
+      age: parsedAge,
+      isOver18,
+    };
+
+    // 2. Persist newly registered user to registry and Firestore
+    const registerRes = await registerUserAsync(user);
+    if (!registerRes.success || !registerRes.user) {
+      setIsLoading(false);
+      setHasAuthError(true);
+      const errMsg = registerRes.error || 'An account with these credentials already exists in the database.';
+      setErrorMsg(errMsg);
+      return;
+    }
+
+    // Persist session immediately to local storage
+    try {
+      localStorage.setItem('asterful_auth_user_v2', JSON.stringify(registerRes.user));
+      localStorage.setItem('constellation_auth_user_v1', JSON.stringify(registerRes.user));
+    } catch {
+      // ignore
+    }
+
+    setIsLoading(false);
+    onAuthSuccess(registerRes.user);
   };
 
   const handlePasswordResetStep1 = (e?: React.FormEvent) => {
