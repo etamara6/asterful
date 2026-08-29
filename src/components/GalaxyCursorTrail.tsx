@@ -392,16 +392,29 @@ export const GalaxyCursorTrail: React.FC = () => {
       renderedMouseRef.current.initialized = false;
     };
 
-    window.addEventListener('pointermove', handlePointerMove, { passive: true });
-    window.addEventListener('mousemove', handleMouseMove, { passive: true });
-    window.addEventListener('touchmove', handleTouchMove, { passive: true });
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        mouseRef.current.isActive = false;
+        renderedMouseRef.current.initialized = false;
+      }
+    };
+
+    window.addEventListener('pointermove', handlePointerMove, { passive: true, capture: false });
+    window.addEventListener('mousemove', handleMouseMove, { passive: true, capture: false });
+    window.addEventListener('touchmove', handleTouchMove, { passive: true, capture: false });
     window.addEventListener('pointerleave', handlePointerLeave, { passive: true });
     window.addEventListener('pointerup', handlePointerLeave, { passive: true });
     document.addEventListener('mouseleave', handlePointerLeave, { passive: true });
+    document.addEventListener('visibilitychange', handleVisibilityChange, { passive: true });
 
     // Dedicated Animation Loop using requestAnimationFrame with Pre-rendered Sprites & Integer Math
     const animate = () => {
       if (!isRunning) return;
+
+      if (document.hidden) {
+        animFrameId = requestAnimationFrame(animate);
+        return;
+      }
 
       const width = window.innerWidth;
       const height = window.innerHeight;
@@ -582,6 +595,7 @@ export const GalaxyCursorTrail: React.FC = () => {
       window.removeEventListener('pointerleave', handlePointerLeave);
       window.removeEventListener('pointerup', handlePointerLeave);
       document.removeEventListener('mouseleave', handlePointerLeave);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (animFrameId) {
         cancelAnimationFrame(animFrameId);
       }
@@ -592,7 +606,14 @@ export const GalaxyCursorTrail: React.FC = () => {
     <canvas
       ref={canvasRef}
       id="galaxy-cursor-trail-canvas"
-      className="fixed inset-0 pointer-events-none z-[9999] overflow-hidden select-none"
+      data-vercel-no-track="true"
+      data-vercel-toolbar-ignore="true"
+      data-speed-insights-ignore="true"
+      data-analytics-ignore="true"
+      data-no-inspect="true"
+      aria-hidden="true"
+      tabIndex={-1}
+      className="fixed inset-0 pointer-events-none z-[9990] overflow-hidden select-none"
       style={{
         position: 'fixed',
         top: 0,
@@ -600,8 +621,11 @@ export const GalaxyCursorTrail: React.FC = () => {
         width: '100vw',
         height: '100vh',
         pointerEvents: 'none',
-        zIndex: 9999,
+        userSelect: 'none',
+        touchAction: 'none',
+        zIndex: 9990,
         willChange: 'transform',
+        contain: 'strict',
       }}
     />
   );
