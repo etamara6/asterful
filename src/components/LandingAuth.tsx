@@ -9,12 +9,14 @@ import logoImage from '../assets/images/logo.jpg';
 
 interface LandingAuthProps {
   onAuthSuccess: (user: User) => void;
+  initialMode?: LandingMode;
 }
 
 export type LandingMode = 'signin' | 'signup' | 'forgot_password';
 
-export const LandingAuth: React.FC<LandingAuthProps> = ({ onAuthSuccess }) => {
-  const [mode, setMode] = useState<LandingMode>('signin');
+export const LandingAuth: React.FC<LandingAuthProps> = ({ onAuthSuccess, initialMode = 'signin' }) => {
+  const [mode, setMode] = useState<LandingMode>(initialMode);
+
   const [emailOrUsername, setEmailOrUsername] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');

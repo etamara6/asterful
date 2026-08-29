@@ -303,10 +303,14 @@ export const BroadcastModal: React.FC<BroadcastModalProps> = ({
   if (!isOpen) return null;
 
   const isHost =
-    currentUser &&
-    activeBroadcast &&
-    (activeBroadcast.hostId === currentUser.id ||
-      activeBroadcast.hostName.toLowerCase().includes(currentUser.displayName.toLowerCase()));
+    Boolean(
+      currentUser &&
+      activeBroadcast &&
+      (activeBroadcast.hostId === currentUser.id ||
+        (activeBroadcast.hostName &&
+          currentUser.displayName &&
+          activeBroadcast.hostName.toLowerCase().includes(currentUser.displayName.toLowerCase())))
+    );
 
   const handleStartBroadcast = (e: React.FormEvent) => {
     e.preventDefault();

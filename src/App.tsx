@@ -4,8 +4,9 @@ import { StarNode, CanvasViewport, StarCluster, StarVisibility, User, UnlitStarD
 import { computeConstellationEdges, calculateSpawnPosition } from './utils/tagEngine';
 
 import { DEFAULT_CLUSTERS } from './utils/colorPalette';
-import { toggleFollowUser, getAllRegisteredUsers, setRegisteredUsersFromCloud } from './utils/userRegistry';
+import { toggleFollowUser, getAllRegisteredUsers, setRegisteredUsersFromCloud, deleteAccountComplete, AccountDeletionResult } from './utils/userRegistry';
 import { toggleStarLike, normalizeLikes } from './utils/likesHelper';
+
 import { toggleStarReignite } from './utils/reigniteHelper';
 import { getStoredUniverses } from './utils/universeRegistry';
 import { 
@@ -39,8 +40,9 @@ import { CreateStoryModal } from './components/CreateStoryModal';
 import { StoryViewerModal } from './components/StoryViewerModal';
 import { AuthModal, AuthMode } from './components/AuthModal';
 import { FloatingControls } from './components/FloatingControls';
-import { LandingAuth } from './components/LandingAuth';
+import { LandingAuth, LandingMode } from './components/LandingAuth';
 import { UserProfileModal } from './components/UserProfileModal';
+
 import { SearchModal, SearchCategory } from './components/SearchModal';
 import { GalaxiesModal } from './components/GalaxiesModal';
 import { NebulaModal } from './components/NebulaModal';
@@ -75,7 +77,9 @@ export default function App() {
 
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<AuthMode>('signin');
+  const [landingInitialMode, setLandingInitialMode] = useState<LandingMode>('signin');
   const [authBannerMessage, setAuthBannerMessage] = useState<string | null>(null);
+
   const [toastNotification, setToastNotification] = useState<string | null>(null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [selectedProfileUser, setSelectedProfileUser] = useState<User | null>(null);
@@ -361,17 +365,21 @@ export default function App() {
     });
 
     // 2. Initial global feed fetch & auto-migration of local data to Cloud Firestore
-    fetchGlobalCosmosFeed().then(({ stars: cloudStars, stories: cloudStories, users: cloudUsers }) => {
-      if (cloudStars && cloudStars.length > 0) {
-        setStars(cloudStars);
-      }
-      if (cloudStories && cloudStories.length > 0) {
-        setStories(cloudStories);
-      }
-      if (cloudUsers && cloudUsers.length > 0) {
-        setRegisteredUsersFromCloud(cloudUsers);
-      }
-    });
+    fetchGlobalCosmosFeed()
+      .then(({ stars: cloudStars, stories: cloudStories, users: cloudUsers }) => {
+        if (cloudStars && cloudStars.length > 0) {
+          setStars(cloudStars);
+        }
+        if (cloudStories && cloudStories.length > 0) {
+          setStories(cloudStories);
+        }
+        if (cloudUsers && cloudUsers.length > 0) {
+          setRegisteredUsersFromCloud(cloudUsers);
+        }
+      })
+      .catch((err) => {
+        console.warn('[Firebase] fetchGlobalCosmosFeed error:', err);
+      });
 
     return () => {
       unsubscribeStars();
@@ -387,43 +395,55 @@ export default function App() {
   const [highlightedTag, setHighlightedTag] = useState<string | null>(null);
 
   // Account and Data Deletion Handler
-  const handleDeleteAccount = useCallback(() => {
-    if (!currentUser) return;
-    const currentUserId = currentUser.id;
-    const currentUserHandle = currentUser.handle.toLowerCase().replace(/^@/, '');
+  const handleDeleteAccount = useCallback(async (passwordForReauth?: string): Promise<AccountDeletionResult | void> => {
+    if (!currentUser) return { success: false, error: 'No active user account to collapse.' };
+    const targetUser = currentUser;
 
-    // a) Filter global stars array to remove all posts matching authorId === currentUser.id (or userId === currentUser.id)
+    const result = await deleteAccountComplete(targetUser, passwordForReauth);
+    if (!result.success) {
+      return result;
+    }
+
+    // Filter global stars array to remove all posts matching authorId === targetUser.id
     const updatedStars = stars.filter((s) => {
-      const isAuthorMatch = s.authorId === currentUserId || s.userId === currentUserId;
-      const isHandleMatch = s.author.handle.toLowerCase().replace(/^@/, '') === currentUserHandle;
-      if (isAuthorMatch || isHandleMatch) {
-        deleteStarFromCloud(s.id, stars);
-      }
+      const isAuthorMatch = s.authorId === targetUser.id || s.userId === targetUser.id;
+      const isHandleMatch = s.author.handle.toLowerCase().replace(/^@/, '') === targetUser.handle.toLowerCase().replace(/^@/, '');
       return !isAuthorMatch && !isHandleMatch;
     });
 
-    // b) Update the stars array in React state and cache
     setStars(updatedStars);
 
-    // c) Clear currentUser from state and localStorage to log user out
+    // Clear currentUser from state to log user out cleanly
     setCurrentUser(null);
-    try {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
-    } catch {
-      // ignore storage errors
-    }
 
-    // Deselect star if it was deleted
+    // Close all open modals & reset active selections
+    setIsProfileModalOpen(false);
+    setSelectedProfileUser(null);
+    setIsCreateModalOpen(false);
+    setIsChatDrawerOpen(false);
+    setIsSearchModalOpen(false);
+    setIsGalaxiesModalOpen(false);
+    setIsNebulaModalOpen(false);
+    setIsCreateStoryModalOpen(false);
+    setIsStoryViewerModalOpen(false);
+    setIsBroadcastModalOpen(false);
+
     if (selectedStarId && !updatedStars.some((s) => s.id === selectedStarId)) {
       setSelectedStarId(null);
     }
 
-    // d) Display success message
-    setToastNotification('Account and all associated stars deleted.');
+    // Direct user cleanly to registration view
+    setLandingInitialMode('signup');
+
+    // Display success message
+    setToastNotification('Your cosmic account and data have been permanently collapsed.');
     setTimeout(() => {
       setToastNotification(null);
-    }, 5000);
+    }, 6000);
+
+    return { success: true };
   }, [currentUser, stars, selectedStarId]);
+
   
   const [viewport, setViewport] = useState<CanvasViewport>({
     x: 0,
@@ -858,7 +878,7 @@ export default function App() {
           </div>
         )}
 
-        <LandingAuth onAuthSuccess={handleAuthSuccess} />
+        <LandingAuth onAuthSuccess={handleAuthSuccess} initialMode={landingInitialMode} />
         {/* Interactive Starlight Galaxy Cursor Trail */}
         <GalaxyCursorTrail />
       </div>

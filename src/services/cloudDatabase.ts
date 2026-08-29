@@ -108,12 +108,13 @@ export function cacheUsers(users: User[]) {
 }
 
 export function subscribeGlobalUsers(onUpdate: (users: User[]) => void): () => void {
+  let unsubscribeFirestore: Unsubscribe | null = null;
   const db = getFirebaseFirestore();
 
   if (db) {
     try {
       const usersCol = collection(db, 'users');
-      const unsubscribeFirestore: Unsubscribe = onSnapshot(
+      unsubscribeFirestore = onSnapshot(
         usersCol,
         (snapshot) => {
           const cloudUsers: User[] = [];
@@ -140,10 +141,6 @@ export function subscribeGlobalUsers(onUpdate: (users: User[]) => void): () => v
           onUpdate(getCachedUsers());
         }
       );
-
-      return () => {
-        unsubscribeFirestore();
-      };
     } catch {
       // Fallback
     }
@@ -172,6 +169,9 @@ export function subscribeGlobalUsers(onUpdate: (users: User[]) => void): () => v
   onUpdate(getCachedUsers());
 
   return () => {
+    if (unsubscribeFirestore) {
+      unsubscribeFirestore();
+    }
     if (broadcastChannel) {
       broadcastChannel.removeEventListener('message', handleBroadcast);
     }
@@ -247,6 +247,123 @@ export async function updateUserInCloud(userId: string, updates: Partial<User>):
     }
   }
 }
+
+export async function deleteUserFromCloud(
+  userId: string, 
+  userEmail?: string, 
+  userHandle?: string
+): Promise<void> {
+  if (!userId) return;
+
+  const normEmail = (userEmail || '').trim().toLowerCase();
+  const normHandle = (userHandle || '').trim().toLowerCase().replace(/^@/, '');
+
+  // 1. Clean local users cache and broadcast
+  const currentUsers = getCachedUsers();
+  const updatedUsers = currentUsers.filter(u => {
+    if (u.id === userId) return false;
+    const uEmail = (u.email || '').trim().toLowerCase();
+    const uHandle = (u.handle || u.username || '').trim().toLowerCase().replace(/^@/, '');
+    if (normEmail && uEmail && uEmail === normEmail) return false;
+    if (normHandle && uHandle && uHandle === normHandle) return false;
+    return true;
+  });
+  cacheUsers(updatedUsers);
+
+  if (broadcastChannel) {
+    broadcastChannel.postMessage({ type: 'USERS_UPDATED', users: updatedUsers });
+  }
+  window.dispatchEvent(new CustomEvent('asterful_users_synced', { detail: { users: updatedUsers } }));
+
+  // 2. Clean up from Firestore database
+  const db = getFirebaseFirestore();
+  if (db) {
+    try {
+      // 2a. Delete direct user doc
+      const userRef = doc(db, 'users', userId);
+      await deleteDoc(userRef).catch(() => {});
+
+      // 2b. Delete any other matching user docs (e.g. by email or handle)
+      const usersCol = collection(db, 'users');
+      const userSnapshots = await getDocs(usersCol);
+      for (const docSnap of userSnapshots.docs) {
+        const uData = docSnap.data() as User;
+        if (!uData) continue;
+        const uEmail = (uData.email || '').trim().toLowerCase();
+        const uHandle = (uData.handle || uData.username || '').trim().toLowerCase().replace(/^@/, '');
+        if (
+          docSnap.id === userId ||
+          (normEmail && uEmail === normEmail) ||
+          (normHandle && uHandle === normHandle)
+        ) {
+          await deleteDoc(doc(db, 'users', docSnap.id)).catch(() => {});
+        }
+      }
+
+      // 2c. Delete user's authored stars from Firestore
+      const starsCol = collection(db, 'stars');
+      const starSnapshots = await getDocs(starsCol);
+      for (const starDoc of starSnapshots.docs) {
+        const s = starDoc.data() as StarNode;
+        if (!s) continue;
+        const authorId = s.authorId || s.userId;
+        const authorHandle = (s.author?.handle || '').trim().toLowerCase().replace(/^@/, '');
+        if (
+          authorId === userId ||
+          (normHandle && authorHandle === normHandle)
+        ) {
+          await deleteDoc(doc(db, 'stars', starDoc.id)).catch(() => {});
+        }
+      }
+
+      // 2d. Delete user's active stories from Firestore
+      const storiesCol = collection(db, 'stories');
+      const storySnapshots = await getDocs(storiesCol);
+      for (const storyDoc of storySnapshots.docs) {
+        const st = storyDoc.data() as StarStory;
+        if (!st) continue;
+        const authorId = st.authorId || (st as any).userId;
+        const authorHandle = ((st as any).author?.handle || '').trim().toLowerCase().replace(/^@/, '');
+        if (
+          authorId === userId ||
+          (normHandle && authorHandle === normHandle)
+        ) {
+          await deleteDoc(doc(db, 'stories', storyDoc.id)).catch(() => {});
+        }
+      }
+    } catch (err) {
+      console.warn('[Firebase] deleteUserFromCloud database cleanup error:', err);
+    }
+  }
+
+  // 3. Clean user's stars from local cache & broadcast
+  const currentStars = getCachedStars();
+  const updatedStars = currentStars.filter(s => {
+    const authorId = s.authorId || s.userId;
+    const authorHandle = (s.author?.handle || '').trim().toLowerCase().replace(/^@/, '');
+    return authorId !== userId && (!normHandle || authorHandle !== normHandle);
+  });
+  cacheStars(updatedStars);
+  if (broadcastChannel) {
+    broadcastChannel.postMessage({ type: 'STARS_UPDATED', stars: updatedStars });
+  }
+  window.dispatchEvent(new CustomEvent('asterful_stars_synced', { detail: { stars: updatedStars } }));
+
+  // 4. Clean user's stories from local cache & broadcast
+  const currentStories = getCachedStories();
+  const updatedStories = currentStories.filter(st => {
+    const authorId = st.authorId || (st as any).userId;
+    const authorHandle = ((st as any).author?.handle || '').trim().toLowerCase().replace(/^@/, '');
+    return authorId !== userId && (!normHandle || authorHandle !== normHandle);
+  });
+
+  cacheStories(updatedStories);
+  if (broadcastChannel) {
+    broadcastChannel.postMessage({ type: 'STORIES_UPDATED', stories: updatedStories });
+  }
+  window.dispatchEvent(new CustomEvent('asterful_stories_synced', { detail: { stories: updatedStories } }));
+}
+
 
 export async function checkUserUniquenessInCloud(params: {
   email?: string;
@@ -395,12 +512,13 @@ export function cacheStars(stars: StarNode[]) {
 }
 
 export function subscribeGlobalStars(onUpdate: (stars: StarNode[]) => void): () => void {
+  let unsubscribeFirestore: Unsubscribe | null = null;
   const db = getFirebaseFirestore();
 
   if (db) {
     try {
       const starsCol = collection(db, 'stars');
-      const unsubscribeFirestore: Unsubscribe = onSnapshot(
+      unsubscribeFirestore = onSnapshot(
         starsCol,
         (snapshot) => {
           const cloudStars: StarNode[] = [];
@@ -433,10 +551,6 @@ export function subscribeGlobalStars(onUpdate: (stars: StarNode[]) => void): () 
           onUpdate(getCachedStars());
         }
       );
-
-      return () => {
-        unsubscribeFirestore();
-      };
     } catch {
       // Fallback
     }
@@ -466,6 +580,9 @@ export function subscribeGlobalStars(onUpdate: (stars: StarNode[]) => void): () 
   onUpdate(getCachedStars());
 
   return () => {
+    if (unsubscribeFirestore) {
+      unsubscribeFirestore();
+    }
     if (broadcastChannel) {
       broadcastChannel.removeEventListener('message', handleBroadcast);
     }
@@ -589,12 +706,13 @@ export function cacheStories(stories: StarStory[]) {
 }
 
 export function subscribeGlobalStories(onUpdate: (stories: StarStory[]) => void): () => void {
+  let unsubscribeFirestore: Unsubscribe | null = null;
   const db = getFirebaseFirestore();
 
   if (db) {
     try {
       const storiesCol = collection(db, 'stories');
-      const unsubscribeFirestore: Unsubscribe = onSnapshot(
+      unsubscribeFirestore = onSnapshot(
         storiesCol,
         (snapshot) => {
           const cloudStories: StarStory[] = [];
@@ -614,10 +732,6 @@ export function subscribeGlobalStories(onUpdate: (stories: StarStory[]) => void)
           onUpdate(getCachedStories());
         }
       );
-
-      return () => {
-        unsubscribeFirestore();
-      };
     } catch {
       // ignore
     }
@@ -645,6 +759,9 @@ export function subscribeGlobalStories(onUpdate: (stories: StarStory[]) => void)
   onUpdate(getCachedStories());
 
   return () => {
+    if (unsubscribeFirestore) {
+      unsubscribeFirestore();
+    }
     if (broadcastChannel) {
       broadcastChannel.removeEventListener('message', handleBroadcast);
     }
@@ -758,12 +875,13 @@ export function cacheGalaxies(galaxies: Galaxy[]) {
 }
 
 export function subscribeGlobalGalaxies(onUpdate: (galaxies: Galaxy[]) => void): () => void {
+  let unsubscribeFirestore: Unsubscribe | null = null;
   const db = getFirebaseFirestore();
 
   if (db) {
     try {
       const galaxiesCol = collection(db, 'galaxies');
-      const unsubscribeFirestore: Unsubscribe = onSnapshot(
+      unsubscribeFirestore = onSnapshot(
         galaxiesCol,
         (snapshot) => {
           const map = new Map<string, Galaxy>();
@@ -785,10 +903,6 @@ export function subscribeGlobalGalaxies(onUpdate: (galaxies: Galaxy[]) => void):
           onUpdate(getCachedGalaxies());
         }
       );
-
-      return () => {
-        unsubscribeFirestore();
-      };
     } catch {
       // ignore
     }
@@ -816,6 +930,9 @@ export function subscribeGlobalGalaxies(onUpdate: (galaxies: Galaxy[]) => void):
   onUpdate(getCachedGalaxies());
 
   return () => {
+    if (unsubscribeFirestore) {
+      unsubscribeFirestore();
+    }
     if (broadcastChannel) {
       broadcastChannel.removeEventListener('message', handleBroadcast);
     }

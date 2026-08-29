@@ -12,6 +12,8 @@ import {
   ChevronDown, 
   Trash2, 
   Eye, 
+  EyeOff,
+  Loader2,
   Lock, 
   AlertTriangle, 
   Sun, 
@@ -30,6 +32,7 @@ import { SearchCategory } from './SearchModal';
 import { getUnreadMessagesCount, CHAT_UPDATE_EVENT } from '../utils/chatStorage';
 import { TERMS } from '../constants/terminology';
 import { StarStoriesBar } from './StarStoriesBar';
+import { AccountDeletionResult } from '../utils/userRegistry';
 import logoImage from '../assets/images/logo.jpg';
 
 interface HeaderProps {
@@ -42,8 +45,9 @@ interface HeaderProps {
   currentUser: User | null;
   onOpenAuthModal: (mode: AuthMode, bannerMessage?: string) => void;
   onLogout: () => void;
-  onDeleteAccount: () => void;
+  onDeleteAccount: (passwordForReauth?: string) => Promise<AccountDeletionResult | void> | void;
   onOpenProfileModal?: () => void;
+
   onOpenSearchModal?: (category?: SearchCategory, query?: string) => void;
   onOpenChat?: () => void;
   onOpenGalaxiesModal?: () => void;
@@ -94,8 +98,44 @@ export const Header: React.FC<HeaderProps> = ({
   const { theme, toggleTheme, isDark } = useTheme();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [deleteAccountPassword, setDeleteAccountPassword] = useState('');
+  const [showDeletePassword, setShowDeletePassword] = useState(false);
+  const [requiresReauth, setRequiresReauth] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
   const [unreadCount, setUnreadCount] = useState(0);
   const userMenuRef = useRef<HTMLDivElement>(null);
+
+  const handleOpenDeleteModal = () => {
+    setDeleteAccountPassword('');
+    setShowDeletePassword(false);
+    setRequiresReauth(false);
+    setDeleteError('');
+    setIsDeletingAccount(false);
+    setIsDeleteModalOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    setDeleteError('');
+    setIsDeletingAccount(true);
+
+    try {
+      const res = await onDeleteAccount(deleteAccountPassword.trim() || undefined);
+      if (res && !res.success) {
+        setIsDeletingAccount(false);
+        if (res.requiresRecentLogin) {
+          setRequiresReauth(true);
+        }
+        setDeleteError(res.error || 'Failed to collapse account. Please try again.');
+        return;
+      }
+      setIsDeleteModalOpen(false);
+    } catch (err: any) {
+      setIsDeletingAccount(false);
+      setDeleteError(err?.message || 'An error occurred during account collapse.');
+    }
+  };
+
 
   // Update unread count for current user
   useEffect(() => {
@@ -524,7 +564,7 @@ export const Header: React.FC<HeaderProps> = ({
                       id="btn-user-delete-account"
                       onClick={() => {
                         setIsUserMenuOpen(false);
-                        setIsDeleteModalOpen(true);
+                        handleOpenDeleteModal();
                       }}
                       className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-xl transition-colors cursor-pointer group"
                     >
@@ -536,6 +576,7 @@ export const Header: React.FC<HeaderProps> = ({
               )}
             </div>
           ) : (
+
             /* Logged Out: Sign In & Create Account Buttons */
             <div className="flex items-center gap-1.5 sm:gap-2">
               <button
@@ -675,41 +716,103 @@ export const Header: React.FC<HeaderProps> = ({
                   <AlertTriangle className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white">Delete Cosmic Account?</h3>
-                  <p className="text-xs text-rose-600 dark:text-rose-300 font-medium">Irreversible Action</p>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">Collapse Cosmic Account?</h3>
+                  <p className="text-xs text-rose-600 dark:text-rose-400 font-medium">Irreversible & Permanent</p>
                 </div>
               </div>
 
-              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mb-6">
-                Are you sure you want to delete your account? This will permanently extinguish all of your authored stars and remove your profile from the Asterful star graph.
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mb-4">
+                Are you sure you want to permanently collapse your account? This will completely remove your profile from Firebase Authentication, extinguish all of your authored stars, and delete your data from the Asterful star graph.
               </p>
 
-              <div className="flex items-center justify-end gap-3">
+              {/* Password Re-authentication Input if required or prompted */}
+              {requiresReauth && (
+                <div className="mb-4 p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/20 animate-in fade-in duration-200">
+                  <div className="flex items-center gap-2 mb-1.5 text-xs font-semibold text-rose-600 dark:text-rose-300">
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>Security Verification Required</span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-400 mb-2.5">
+                    Please enter your account password to authorize permanent deletion.
+                  </p>
+                  <div className="relative">
+                    <input
+                      id="input-delete-account-password"
+                      type={showDeletePassword ? 'text' : 'password'}
+                      value={deleteAccountPassword}
+                      onChange={(e) => {
+                        setDeleteAccountPassword(e.target.value);
+                        setDeleteError('');
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !isDeletingAccount) {
+                          e.preventDefault();
+                          handleConfirmDelete();
+                        }
+                      }}
+                      placeholder="Enter your account password"
+                      className="w-full pl-3.5 pr-10 py-2 rounded-xl text-xs bg-white dark:bg-black/40 border border-rose-400/40 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-rose-500"
+                      disabled={isDeletingAccount}
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowDeletePassword(!showDeletePassword)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 cursor-pointer"
+                    >
+                      {showDeletePassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Error Message */}
+              {deleteError && (
+                <div className="mb-4 p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-600 dark:text-rose-300 text-xs flex items-start gap-2 animate-in fade-in duration-200">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span className="leading-tight">{deleteError}</span>
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-3 pt-2">
                 <button
                   type="button"
                   id="btn-cancel-delete-account"
-                  onClick={() => setIsDeleteModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white bg-slate-100 hover:bg-slate-200 dark:bg-white/[0.05] dark:hover:bg-white/10 border border-slate-300 dark:border-white/10 transition-colors cursor-pointer"
+                  onClick={() => {
+                    if (!isDeletingAccount) {
+                      setIsDeleteModalOpen(false);
+                    }
+                  }}
+                  disabled={isDeletingAccount}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white bg-slate-100 hover:bg-slate-200 dark:bg-white/[0.05] dark:hover:bg-white/10 border border-slate-300 dark:border-white/10 transition-colors cursor-pointer disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
                   id="btn-confirm-delete-account"
-                  onClick={() => {
-                    setIsDeleteModalOpen(false);
-                    onDeleteAccount();
-                  }}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 border border-rose-400/40 shadow-[0_0_18px_rgba(244,63,94,0.4)] cursor-pointer transition-all active:scale-95"
+                  onClick={handleConfirmDelete}
+                  disabled={isDeletingAccount || (requiresReauth && !deleteAccountPassword.trim())}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 border border-rose-400/40 shadow-[0_0_18px_rgba(244,63,94,0.4)] cursor-pointer transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Permanently Delete</span>
+                  {isDeletingAccount ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Extinguishing Account...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>{requiresReauth ? 'Verify & Collapse' : 'Permanently Collapse'}</span>
+                    </>
+                  )}
                 </button>
               </div>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
+
     </header>
   );
 };

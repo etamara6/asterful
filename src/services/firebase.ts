@@ -18,6 +18,17 @@ import {
   DocumentData,
   Unsubscribe
 } from 'firebase/firestore';
+import {
+  getAuth,
+  Auth,
+  deleteUser,
+  signInWithEmailAndPassword,
+  reauthenticateWithCredential,
+  EmailAuthProvider,
+  signOut,
+  onAuthStateChanged,
+  type User as FirebaseUser
+} from 'firebase/auth';
 
 /**
  * Firebase Web Configuration
@@ -35,6 +46,7 @@ const firebaseConfig = {
 
 let appInstance: FirebaseApp | null = null;
 let firestoreInstance: Firestore | null = null;
+let authInstance: Auth | null = null;
 
 export function isFirebaseConfigured(): boolean {
   return Boolean(
@@ -75,6 +87,21 @@ export function getFirebaseFirestore(): Firestore | null {
   return firestoreInstance;
 }
 
+export function getFirebaseAuth(): Auth | null {
+  if (!isFirebaseConfigured()) return null;
+  if (!authInstance) {
+    const app = getFirebaseApp();
+    if (app) {
+      try {
+        authInstance = getAuth(app);
+      } catch (err) {
+        return null;
+      }
+    }
+  }
+  return authInstance;
+}
+
 export { 
   collection, 
   doc, 
@@ -87,6 +114,13 @@ export {
   query, 
   where,
   orderBy, 
-  limit 
+  limit,
+  deleteUser,
+  signInWithEmailAndPassword,
+  reauthenticateWithCredential,
+  EmailAuthProvider,
+  signOut,
+  onAuthStateChanged
 };
-export type { Firestore, CollectionReference, DocumentData, Unsubscribe };
+export type { Firestore, CollectionReference, DocumentData, Unsubscribe, Auth, FirebaseUser };
+

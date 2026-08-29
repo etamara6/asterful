@@ -3,13 +3,23 @@ import { DEFAULT_COSMIC_AVATAR } from './colorPalette';
 import { 
   saveUserToCloud, 
   updateUserInCloud, 
+  deleteUserFromCloud,
   findUserInCloud, 
   checkUserUniquenessInCloud,
   getCachedUsers, 
   cacheUsers 
 } from '../services/cloudDatabase';
+import {
+  getFirebaseAuth,
+  deleteUser as firebaseDeleteUser,
+  signInWithEmailAndPassword,
+  reauthenticateWithCredential,
+  EmailAuthProvider,
+  signOut as firebaseSignOut
+} from '../services/firebase';
 
 export { checkUserUniquenessInCloud };
+
 
 export const REGISTERED_USERS_KEY = 'asterful_registered_users';
 export const LEGACY_REGISTERED_USERS_KEY = 'constellation_registered_users_v1';
@@ -593,3 +603,150 @@ export function updateUserPassword(
 
   return { success: true, user: updatedUser };
 }
+
+export interface AccountDeletionResult {
+  success: boolean;
+  requiresRecentLogin?: boolean;
+  error?: string;
+}
+
+/**
+ * Performs full deletion of an account across Firebase Authentication,
+ * Cloud Firestore documents, and local session storage.
+ */
+export async function deleteAccountComplete(
+  user: User,
+  passwordForReauth?: string
+): Promise<AccountDeletionResult> {
+  if (!user || user.isGuest) {
+    return { success: false, error: 'Invalid user account.' };
+  }
+
+  // 1. Firebase Authentication Deletion
+  const auth = getFirebaseAuth();
+  if (auth) {
+    try {
+      let firebaseUser = auth.currentUser;
+
+      // If no active currentUser in auth instance but user has email/password, attempt sign in first
+      if (!firebaseUser && user.email) {
+        const passwordToUse = passwordForReauth || user.password;
+        if (passwordToUse) {
+          try {
+            const credentialResult = await signInWithEmailAndPassword(auth, user.email, passwordToUse);
+            firebaseUser = credentialResult.user;
+          } catch (signInErr: any) {
+            console.warn('[Firebase] signIn before deletion error:', signInErr);
+          }
+        }
+      }
+
+      if (firebaseUser) {
+        // If password was provided for re-authentication, re-authenticate first
+        if (passwordForReauth && firebaseUser.email) {
+          try {
+            const credential = EmailAuthProvider.credential(firebaseUser.email, passwordForReauth);
+            await reauthenticateWithCredential(firebaseUser, credential);
+          } catch (reauthErr: any) {
+            console.warn('[Firebase] Reauthentication error:', reauthErr);
+            return {
+              success: false,
+              requiresRecentLogin: true,
+              error: 'Invalid password. Please re-enter your password to confirm account collapse.',
+            };
+          }
+        }
+
+        // Call deleteUser(auth.currentUser)
+        try {
+          await firebaseDeleteUser(firebaseUser);
+        } catch (delErr: any) {
+          console.warn('[Firebase] deleteUser error:', delErr);
+          if (
+            delErr.code === 'auth/requires-recent-login' ||
+            (delErr.message && delErr.message.includes('requires-recent-login'))
+          ) {
+            return {
+              success: false,
+              requiresRecentLogin: true,
+              error: 'This action requires recent authentication. Please enter your password to collapse your account.',
+            };
+          }
+        }
+      }
+    } catch (authErr: any) {
+      console.warn('[Firebase Auth] General deletion error:', authErr);
+      if (
+        authErr.code === 'auth/requires-recent-login' ||
+        (authErr.message && authErr.message.includes('requires-recent-login'))
+      ) {
+        return {
+          success: false,
+          requiresRecentLogin: true,
+          error: 'This action requires recent authentication. Please enter your password to collapse your account.',
+        };
+      }
+    }
+  }
+
+  // 2. Cloud Firestore & Local Cache Cleanup
+  try {
+    await deleteUserFromCloud(user.id, user.email, user.handle);
+  } catch (cloudErr) {
+    console.warn('[Firebase] deleteUserFromCloud error:', cloudErr);
+  }
+
+  // 3. Remove user from local registries
+  try {
+    const normEmail = (user.email || '').trim().toLowerCase();
+    const normHandle = (user.handle || user.username || '').trim().toLowerCase().replace(/^@/, '');
+    const currentUsers = getAllRegisteredUsers().filter(u => {
+      if (u.id === user.id) return false;
+      const uEmail = (u.email || '').trim().toLowerCase();
+      const uHandle = (u.handle || u.username || '').trim().toLowerCase().replace(/^@/, '');
+      if (normEmail && uEmail && uEmail === normEmail) return false;
+      if (normHandle && uHandle && uHandle === normHandle) return false;
+      return true;
+    });
+    cachedUsersList = currentUsers;
+    cacheUsers(currentUsers);
+  } catch {
+    // ignore
+  }
+
+  // 4. State & Storage Reset: Purge all session keys and user-specific storage
+  const storageKeysToRemove = [
+    'asterful_auth_user_v2',
+    'constellation_auth_user_v1',
+    'asterful_auth_token',
+    'asterful_current_user',
+    `asterful_unlit_drafts_${user.id}`,
+    'asterful_unlit_drafts',
+    'constellation_unlit_drafts',
+    `asterful_bookmarks_${user.id}`,
+    `asterful_liked_stars_${user.id}`,
+    `asterful_reignited_stars_${user.id}`,
+    `asterful_notifications_${user.id}`,
+    `asterful_saved_stars_${user.id}`,
+    'asterful_recent_searches',
+  ];
+
+  storageKeysToRemove.forEach(key => {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // ignore
+    }
+  });
+
+  if (auth) {
+    try {
+      await firebaseSignOut(auth);
+    } catch {
+      // ignore
+    }
+  }
+
+  return { success: true };
+}
+
