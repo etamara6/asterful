@@ -4,7 +4,7 @@ import { StarNode, CanvasViewport, StarCluster, StarVisibility, User, UnlitStarD
 import { computeConstellationEdges, calculateSpawnPosition } from './utils/tagEngine';
 
 import { DEFAULT_CLUSTERS } from './utils/colorPalette';
-import { toggleFollowUser, getAllRegisteredUsers } from './utils/userRegistry';
+import { toggleFollowUser, getAllRegisteredUsers, setRegisteredUsersFromCloud } from './utils/userRegistry';
 import { toggleStarLike, normalizeLikes } from './utils/likesHelper';
 import { toggleStarReignite } from './utils/reigniteHelper';
 import { getStoredUniverses } from './utils/universeRegistry';
@@ -18,12 +18,15 @@ import {
 import {
   subscribeGlobalStars,
   subscribeGlobalStories,
+  subscribeGlobalUsers,
+  subscribeGlobalGalaxies,
   saveStarToCloud,
   updateStarInCloud,
   deleteStarFromCloud,
   saveStoryToCloud,
   deleteStoryFromCloud,
   markStoryViewedInCloud,
+  saveUserToCloud,
   fetchGlobalCosmosFeed,
   getCachedStars,
   getCachedStories
@@ -56,16 +59,6 @@ const LEGACY_AUTH_STORAGE_KEY = 'constellation_auth_user_v1';
 export default function App() {
   const { theme, isDark } = useTheme();
   const isDarkMode = isDark;
-
-  // One-time legacy localStorage cache clear check
-  useEffect(() => {
-    const storageVersion = localStorage.getItem('asterful_purge_v4');
-    if (!storageVersion) {
-      localStorage.clear();
-      localStorage.setItem('asterful_purge_v4', 'true');
-    }
-  }, []);
-
 
   // 1. User Authentication State with localStorage Persistence
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
@@ -317,18 +310,24 @@ export default function App() {
     } catch {
       // ignore storage error
     }
+
+    // Persist updated profile to Firestore Cloud
+    saveUserToCloud(updatedUser);
+
     // Update user authored stars with latest display name and avatar
     setStars(prevStars => prevStars.map(s => {
       const isAuthorMatch = (s.authorId && s.authorId === updatedUser.id) || (s.userId && s.userId === updatedUser.id);
       if (isAuthorMatch) {
+        const updatedAuthor = {
+          ...s.author,
+          name: updatedUser.displayName || updatedUser.username || s.author.name,
+          handle: updatedUser.handle || s.author.handle,
+          avatarUrl: updatedUser.avatarUrl || s.author.avatarUrl,
+        };
+        updateStarInCloud(s.id, { author: updatedAuthor }, prevStars);
         return {
           ...s,
-          author: {
-            ...s.author,
-            name: updatedUser.displayName || updatedUser.username || s.author.name,
-            handle: updatedUser.handle || s.author.handle,
-            avatarUrl: updatedUser.avatarUrl || s.author.avatarUrl,
-          }
+          author: updatedAuthor
         };
       }
       return s;
@@ -344,17 +343,7 @@ export default function App() {
 
   // Global Real-Time Cloud Database Feed & Multiplayer Sync on Load
   useEffect(() => {
-    // 1. Initial global feed fetch on mount (fetches posts from all accounts across the database)
-    fetchGlobalCosmosFeed().then(({ stars: cloudStars, stories: cloudStories }) => {
-      if (cloudStars && cloudStars.length > 0) {
-        setStars(cloudStars);
-      }
-      if (cloudStories && cloudStories.length > 0) {
-        setStories(cloudStories);
-      }
-    });
-
-    // 2. Real-time multiplayer subscriptions (Firebase onSnapshot / Cross-Tab BroadcastChannel)
+    // 1. Real-time multiplayer subscriptions (Firebase onSnapshot / Cross-Tab BroadcastChannel)
     const unsubscribeStars = subscribeGlobalStars((updatedStars) => {
       setStars(updatedStars);
     });
@@ -363,9 +352,32 @@ export default function App() {
       setStories(updatedStories);
     });
 
+    const unsubscribeUsers = subscribeGlobalUsers((updatedUsers) => {
+      setRegisteredUsersFromCloud(updatedUsers);
+    });
+
+    const unsubscribeGalaxies = subscribeGlobalGalaxies((updatedGalaxies) => {
+      // Galaxy updates
+    });
+
+    // 2. Initial global feed fetch & auto-migration of local data to Cloud Firestore
+    fetchGlobalCosmosFeed().then(({ stars: cloudStars, stories: cloudStories, users: cloudUsers }) => {
+      if (cloudStars && cloudStars.length > 0) {
+        setStars(cloudStars);
+      }
+      if (cloudStories && cloudStories.length > 0) {
+        setStories(cloudStories);
+      }
+      if (cloudUsers && cloudUsers.length > 0) {
+        setRegisteredUsersFromCloud(cloudUsers);
+      }
+    });
+
     return () => {
       unsubscribeStars();
       unsubscribeStories();
+      unsubscribeUsers();
+      unsubscribeGalaxies();
     };
   }, []);
 

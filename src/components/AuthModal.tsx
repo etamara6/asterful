@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { User } from '../types';
 import { DEFAULT_COSMIC_AVATAR } from '../utils/colorPalette';
-import { getAllRegisteredUsers, isDisplayNameTaken, isEmailTaken, isUsernameTaken, generateCleanHandle, registerUser, validateUserCredentials, findUserByEmail, findUserByIdentifier, updateUserPassword } from '../utils/userRegistry';
+import { getAllRegisteredUsers, isDisplayNameTaken, isEmailTaken, isUsernameTaken, generateCleanHandle, registerUser, validateUserCredentials, validateUserCredentialsAsync, findUserByEmail, findUserByIdentifier, updateUserPassword } from '../utils/userRegistry';
 import { TERMS } from '../constants/terminology';
 import logoImage from '../assets/images/logo.jpg';
 
@@ -157,7 +157,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   };
 
   // Quick helper to generate avatar or colors
-  const handleSignIn = (e: React.FormEvent) => {
+  const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setPasswordError('');
@@ -176,38 +176,33 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    const validation = validateUserCredentials(email, password);
+    setIsLoading(true);
+    const validation = await validateUserCredentialsAsync(email, password);
     if (!validation.success || !validation.user) {
       const errorType = validation.error || 'NO_ACCOUNT';
-      setIsLoading(true);
-      setTimeout(() => {
-        setIsLoading(false);
-        setHasAuthError(true);
-        if (errorType === 'WRONG_PASSWORD') {
-          setPasswordError('Incorrect password.');
-        } else {
-          setErrorMsg('No account found on this domain. Would you like to create one?');
-        }
-      }, 300);
+      setIsLoading(false);
+      setHasAuthError(true);
+      if (errorType === 'WRONG_PASSWORD') {
+        setPasswordError('Incorrect password.');
+      } else {
+        setErrorMsg('No account found on this domain. Would you like to create one?');
+      }
       return;
     }
 
     const validUser = validation.user;
-    setIsLoading(true);
-    setTimeout(() => {
-      setIsLoading(false);
-      setHasAuthError(false);
-      setErrorMsg('');
-      setPasswordError('');
-      try {
-        localStorage.setItem('asterful_auth_user_v2', JSON.stringify(validUser));
-        localStorage.setItem('constellation_auth_user_v1', JSON.stringify(validUser));
-      } catch {
-        // ignore
-      }
-      onSuccess(validUser);
-      onClose();
-    }, 350);
+    setIsLoading(false);
+    setHasAuthError(false);
+    setErrorMsg('');
+    setPasswordError('');
+    try {
+      localStorage.setItem('asterful_auth_user_v2', JSON.stringify(validUser));
+      localStorage.setItem('constellation_auth_user_v1', JSON.stringify(validUser));
+    } catch {
+      // ignore
+    }
+    onSuccess(validUser);
+    onClose();
   };
 
   const handleRegister = (e: React.FormEvent) => {

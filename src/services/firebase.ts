@@ -11,6 +11,7 @@ import {
   updateDoc, 
   onSnapshot, 
   query, 
+  where,
   orderBy, 
   limit,
   CollectionReference,
@@ -84,6 +85,7 @@ export {
   updateDoc, 
   onSnapshot, 
   query, 
+  where,
   orderBy, 
   limit 
 };

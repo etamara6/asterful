@@ -1,6 +1,12 @@
 import { User } from '../types';
 import { DEFAULT_COSMIC_AVATAR } from './colorPalette';
-
+import { 
+  saveUserToCloud, 
+  updateUserInCloud, 
+  findUserInCloud, 
+  getCachedUsers, 
+  cacheUsers 
+} from '../services/cloudDatabase';
 
 export const REGISTERED_USERS_KEY = 'asterful_registered_users';
 export const LEGACY_REGISTERED_USERS_KEY = 'constellation_registered_users_v1';
@@ -18,10 +24,19 @@ export interface RegisteredUserProfile {
 export const INITIAL_CREATORS: User[] = [];
 
 /**
- * Retrieves all registered users and creators from localStorage.
+ * Updates the in-memory cache and localStorage when cloud data changes
+ */
+export function setRegisteredUsersFromCloud(users: User[]): void {
+  if (!Array.isArray(users)) return;
+  cachedUsersList = users;
+  cacheUsers(users);
+}
+
+/**
+ * Retrieves all registered users and creators from localStorage and memory cache.
  */
 export function getAllRegisteredUsers(): User[] {
-  if (cachedUsersList) {
+  if (cachedUsersList && cachedUsersList.length > 0) {
     return cachedUsersList;
   }
   const usersMap = new Map<string, User>();
@@ -31,27 +46,21 @@ export function getAllRegisteredUsers(): User[] {
     usersMap.set(creator.id, { age: 24, isOver18: true, ...creator });
   });
 
-  // 2. Load stored users from localStorage cleanly without mock fallbacks
+  // 2. Load stored users from cloud cached localStorage
   try {
-    const raw = localStorage.getItem(REGISTERED_USERS_KEY) || localStorage.getItem(LEGACY_REGISTERED_USERS_KEY);
-    if (raw) {
-      const parsed: User[] = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        parsed.forEach((u) => {
-          if (u && u.id) {
-            const existing = usersMap.get(u.id);
-            usersMap.set(u.id, {
-              ...existing,
-              ...u,
-              followers: u.followers || existing?.followers || [],
-              following: u.following || existing?.following || [],
-            });
-          }
-        });
-      }
-    } else {
-      // Cleanly initialize the key if empty on new domain
-      localStorage.setItem(REGISTERED_USERS_KEY, JSON.stringify([]));
+    const cached = getCachedUsers();
+    if (Array.isArray(cached)) {
+      cached.forEach((u) => {
+        if (u && u.id) {
+          const existing = usersMap.get(u.id);
+          usersMap.set(u.id, {
+            ...existing,
+            ...u,
+            followers: u.followers || existing?.followers || [],
+            following: u.following || existing?.following || [],
+          });
+        }
+      });
     }
   } catch {
     // Ignore storage parse errors
@@ -194,7 +203,6 @@ export function isDisplayNameTaken(nameToTest: string, excludeUserId?: string): 
 
 /**
  * Generates a clean handle or username by stripping email domains, '@' symbols, and invalid characters.
- * E.g. 'lunaradiant7@gmail.com' -> 'lunaradiant7'
  */
 export function generateCleanHandle(rawInput: string): string {
   if (!rawInput) return 'stargazer';
@@ -250,7 +258,7 @@ export function isEmailOrUsernameTaken(identifierToTest: string, excludeUserId?:
 }
 
 /**
- * Saves a newly registered user to the persistent registry in localStorage.
+ * Saves a newly registered user to the persistent registry in localStorage and Cloud Firestore.
  */
 export function registerUser(user: User): void {
   if (!user || user.isGuest) return;
@@ -262,8 +270,9 @@ export function registerUser(user: User): void {
       (u) => u.id === user.id || (u.displayName || u.username || '').trim().toLowerCase() === normalizedNewName
     );
 
+    let updatedUser: User;
     if (existingIndex >= 0) {
-      allUsers[existingIndex] = {
+      updatedUser = {
         ...allUsers[existingIndex],
         ...user,
         followers: user.followers !== undefined ? user.followers : allUsers[existingIndex].followers || [],
@@ -272,21 +281,24 @@ export function registerUser(user: User): void {
         isPrivateSky: user.isPrivateSky !== undefined ? user.isPrivateSky : allUsers[existingIndex].isPrivateSky || false,
         orbitRequests: user.orbitRequests !== undefined ? user.orbitRequests : allUsers[existingIndex].orbitRequests || [],
       };
+      allUsers[existingIndex] = updatedUser;
     } else {
-      allUsers.push({
+      updatedUser = {
         ...user,
         followers: user.followers || [],
         following: user.following || [],
         eclipsedUserIds: user.eclipsedUserIds || [],
         isPrivateSky: user.isPrivateSky || false,
         orbitRequests: user.orbitRequests || [],
-      });
+      };
+      allUsers.push(updatedUser);
     }
 
-    const payload = JSON.stringify(allUsers);
-    localStorage.setItem(REGISTERED_USERS_KEY, payload);
-    localStorage.setItem(LEGACY_REGISTERED_USERS_KEY, payload);
     cachedUsersList = allUsers;
+    cacheUsers(allUsers);
+
+    // Save to Cloud Firestore
+    saveUserToCloud(updatedUser);
   } catch {
     // Ignore storage errors
   }
@@ -294,9 +306,6 @@ export function registerUser(user: User): void {
 
 /**
  * Toggles the follow status between currentUser and targetUser.
- * If targetUser has enabled Private Sky 🔒 and currentUser is not following yet,
- * it toggles an Orbit Request instead.
- * Returns the updated currentUser and targetUser.
  */
 export function toggleFollowUser(
   currentUser: User,
@@ -382,7 +391,7 @@ export function toggleFollowUser(
     following: targetUser.following || [],
   };
 
-  // Persist both in allUsers
+  // Persist both locally and in cloud
   registerUser(updatedCurrentUser);
   registerUser(updatedTargetUser);
 
@@ -434,11 +443,7 @@ export interface AuthValidationResult {
 }
 
 /**
- * Validates sign-in credentials against registered users.
- * Returns:
- * - { success: false, error: 'NO_ACCOUNT' } if no user matches the email/username.
- * - { success: false, error: 'WRONG_PASSWORD' } if account exists but password doesn't match.
- * - { success: true, user } if both email/username and password match.
+ * Validates sign-in credentials against registered users (synchronous cache + local storage).
  */
 export function validateUserCredentials(
   identifier: string,
@@ -460,7 +465,43 @@ export function validateUserCredentials(
 }
 
 /**
- * Updates a registered user's account password directly in localStorage and in-memory state.
+ * Validates sign-in credentials with async Firestore cloud lookup fallback.
+ * Guarantees cross-device sign-in works immediately even if the user registered on another device.
+ */
+export async function validateUserCredentialsAsync(
+  identifier: string,
+  passwordInput: string
+): Promise<AuthValidationResult> {
+  // 1. Try local cache first
+  const localResult = validateUserCredentials(identifier, passwordInput);
+  if (localResult.success) {
+    return localResult;
+  }
+
+  // 2. If user not found locally, query Firestore directly
+  if (localResult.error === 'NO_ACCOUNT') {
+    const cloudUser = await findUserInCloud(identifier);
+    if (!cloudUser) {
+      return { success: false, error: 'NO_ACCOUNT' };
+    }
+
+    const trimmedPassword = passwordInput.trim();
+    const storedPassword = cloudUser.password || 'password123';
+
+    if (storedPassword !== trimmedPassword) {
+      return { success: false, error: 'WRONG_PASSWORD' };
+    }
+
+    // Save to local cache
+    registerUser(cloudUser);
+    return { success: true, user: cloudUser };
+  }
+
+  return localResult;
+}
+
+/**
+ * Updates a registered user's account password in localStorage and Cloud Firestore.
  */
 export function updateUserPassword(
   identifierOrEmail: string,
@@ -494,16 +535,11 @@ export function updateUserPassword(
   };
 
   allUsers[userIndex] = updatedUser;
+  cachedUsersList = allUsers;
+  cacheUsers(allUsers);
 
-  try {
-    const payload = JSON.stringify(allUsers);
-    localStorage.setItem(REGISTERED_USERS_KEY, payload);
-    localStorage.setItem(LEGACY_REGISTERED_USERS_KEY, payload);
-    cachedUsersList = allUsers;
-  } catch {
-    // Ignore storage quota errors
-  }
+  // Cloud Firestore update
+  updateUserInCloud(updatedUser.id, { password: newPassword.trim() });
 
   return { success: true, user: updatedUser };
 }
-

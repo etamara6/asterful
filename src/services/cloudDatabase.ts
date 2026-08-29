@@ -1,6 +1,7 @@
 import { StarNode } from '../types/star';
 import { StarStory } from '../types/story';
 import { Galaxy } from '../types/galaxy';
+import { User } from '../types';
 import { INITIAL_GALAXIES } from '../utils/galaxyRegistry';
 import { 
   getFirebaseFirestore, 
@@ -9,16 +10,23 @@ import {
   doc, 
   setDoc, 
   getDocs, 
+  getDoc,
   deleteDoc, 
   updateDoc, 
   onSnapshot, 
+  query,
+  where,
   Unsubscribe 
 } from './firebase';
 
 // Local storage fallback cache keys
 const STARS_CACHE_KEY = 'constellation_stars_v2';
+const LEGACY_STARS_CACHE_KEY = 'constellation_stars_v1';
 const STORIES_CACHE_KEY = 'asterful_star_stories_v3';
+const LEGACY_STORIES_CACHE_KEY = 'asterful_star_stories_v2';
 const GALAXIES_CACHE_KEY = 'asterful_galaxies';
+const USERS_CACHE_KEY = 'asterful_registered_users';
+const LEGACY_USERS_CACHE_KEY = 'constellation_registered_users_v1';
 
 // Cross-tab / multiplayer sync channel for real-time local and network synchronization
 const MULTIPLAYER_BROADCAST_CHANNEL = 'asterful_cosmos_multiplayer_sync';
@@ -72,16 +80,13 @@ export function getCloudStatus(): CloudStatus {
 
 /**
  * --------------------------------------------------------------------------------
- * STARS CLOUD INTEGRATION
+ * USERS CLOUD INTEGRATION & MULTIPLAYER SYNC
  * --------------------------------------------------------------------------------
  */
 
-/**
- * Loads cached stars from local storage
- */
-export function getCachedStars(): StarNode[] {
+export function getCachedUsers(): User[] {
   try {
-    const raw = localStorage.getItem(STARS_CACHE_KEY);
+    const raw = localStorage.getItem(USERS_CACHE_KEY) || localStorage.getItem(LEGACY_USERS_CACHE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) return parsed;
@@ -92,26 +97,232 @@ export function getCachedStars(): StarNode[] {
   return [];
 }
 
-/**
- * Persists stars locally to fast cache
- */
-export function cacheStars(stars: StarNode[]) {
+export function cacheUsers(users: User[]) {
   try {
-    localStorage.setItem(STARS_CACHE_KEY, JSON.stringify(stars));
+    const payload = JSON.stringify(users);
+    localStorage.setItem(USERS_CACHE_KEY, payload);
+    localStorage.setItem(LEGACY_USERS_CACHE_KEY, payload);
   } catch {
     // ignore
   }
 }
 
+export function subscribeGlobalUsers(onUpdate: (users: User[]) => void): () => void {
+  const db = getFirebaseFirestore();
+
+  if (db) {
+    try {
+      const usersCol = collection(db, 'users');
+      const unsubscribeFirestore: Unsubscribe = onSnapshot(
+        usersCol,
+        (snapshot) => {
+          const cloudUsers: User[] = [];
+          snapshot.forEach((docSnap) => {
+            const data = docSnap.data() as User;
+            if (data && data.id) {
+              cloudUsers.push(data);
+            }
+          });
+
+          if (cloudUsers.length > 0) {
+            // Merge with any cached users that may not have synced yet
+            const localUsers = getCachedUsers();
+            const mergedMap = new Map<string, User>();
+            localUsers.forEach(u => mergedMap.set(u.id, u));
+            cloudUsers.forEach(u => mergedMap.set(u.id, u));
+            const merged = Array.from(mergedMap.values());
+            cacheUsers(merged);
+            onUpdate(merged);
+          }
+        },
+        (error) => {
+          console.warn('[Firebase] users onSnapshot error:', error);
+          onUpdate(getCachedUsers());
+        }
+      );
+
+      return () => {
+        unsubscribeFirestore();
+      };
+    } catch {
+      // Fallback
+    }
+  }
+
+  // Cross-tab broadcast listener
+  const handleBroadcast = (event: MessageEvent) => {
+    if (event.data?.type === 'USERS_UPDATED' && Array.isArray(event.data.users)) {
+      cacheUsers(event.data.users);
+      onUpdate(event.data.users);
+    }
+  };
+
+  const handleWindowCustomEvent = (e: Event) => {
+    const custom = e as CustomEvent<{ users: User[] }>;
+    if (custom.detail?.users) {
+      onUpdate(custom.detail.users);
+    }
+  };
+
+  if (broadcastChannel) {
+    broadcastChannel.addEventListener('message', handleBroadcast);
+  }
+  window.addEventListener('asterful_users_synced', handleWindowCustomEvent);
+
+  onUpdate(getCachedUsers());
+
+  return () => {
+    if (broadcastChannel) {
+      broadcastChannel.removeEventListener('message', handleBroadcast);
+    }
+    window.removeEventListener('asterful_users_synced', handleWindowCustomEvent);
+  };
+}
+
+export async function saveUserToCloud(user: User): Promise<void> {
+  if (!user || user.isGuest) return;
+
+  const currentUsers = getCachedUsers();
+  const index = currentUsers.findIndex(u => u.id === user.id);
+  let updatedUsers: User[];
+  if (index >= 0) {
+    updatedUsers = [...currentUsers];
+    updatedUsers[index] = { ...updatedUsers[index], ...user };
+  } else {
+    updatedUsers = [...currentUsers, user];
+  }
+
+  cacheUsers(updatedUsers);
+
+  if (broadcastChannel) {
+    broadcastChannel.postMessage({ type: 'USERS_UPDATED', users: updatedUsers });
+  }
+  window.dispatchEvent(new CustomEvent('asterful_users_synced', { detail: { users: updatedUsers } }));
+
+  const db = getFirebaseFirestore();
+  if (db) {
+    try {
+      const userRef = doc(db, 'users', user.id);
+      await setDoc(userRef, {
+        ...user,
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.warn('[Firebase] saveUserToCloud error:', err);
+    }
+  }
+}
+
+export async function updateUserInCloud(userId: string, updates: Partial<User>): Promise<void> {
+  if (!userId) return;
+
+  const currentUsers = getCachedUsers();
+  const updatedUsers = currentUsers.map(u => u.id === userId ? { ...u, ...updates } : u);
+  cacheUsers(updatedUsers);
+
+  if (broadcastChannel) {
+    broadcastChannel.postMessage({ type: 'USERS_UPDATED', users: updatedUsers });
+  }
+  window.dispatchEvent(new CustomEvent('asterful_users_synced', { detail: { users: updatedUsers } }));
+
+  const db = getFirebaseFirestore();
+  if (db) {
+    try {
+      const userRef = doc(db, 'users', userId);
+      await updateDoc(userRef, {
+        ...updates,
+        updatedAt: new Date().toISOString(),
+      });
+    } catch {
+      // If doc does not exist yet, fallback to setDoc
+      try {
+        const fullUser = updatedUsers.find(u => u.id === userId);
+        if (fullUser) {
+          const userRef = doc(db, 'users', userId);
+          await setDoc(userRef, { ...fullUser, updatedAt: new Date().toISOString() });
+        }
+      } catch (err) {
+        console.warn('[Firebase] updateUserInCloud fallback error:', err);
+      }
+    }
+  }
+}
+
+export async function findUserInCloud(identifier: string): Promise<User | null> {
+  const normalized = identifier.trim().toLowerCase().replace(/^@/, '');
+  if (!normalized) return null;
+
+  // Check local cache first
+  const localUsers = getCachedUsers();
+  const localMatch = localUsers.find(u => {
+    const uEmail = (u.email || '').trim().toLowerCase();
+    const uUsername = (u.username || '').trim().toLowerCase();
+    const uHandle = (u.handle || '').replace(/^@/, '').trim().toLowerCase();
+    const uDisplayName = (u.displayName || '').trim().toLowerCase();
+    return uEmail === normalized || uUsername === normalized || uHandle === normalized || uDisplayName === normalized;
+  });
+  if (localMatch) return localMatch;
+
+  // Check Firestore directly
+  const db = getFirebaseFirestore();
+  if (!db) return null;
+
+  try {
+    const usersCol = collection(db, 'users');
+    const snapshot = await getDocs(usersCol);
+    for (const docSnap of snapshot.docs) {
+      const u = docSnap.data() as User;
+      if (u) {
+        const uEmail = (u.email || '').trim().toLowerCase();
+        const uUsername = (u.username || '').trim().toLowerCase();
+        const uHandle = (u.handle || '').replace(/^@/, '').trim().toLowerCase();
+        const uDisplayName = (u.displayName || '').trim().toLowerCase();
+        if (uEmail === normalized || uUsername === normalized || uHandle === normalized || uDisplayName === normalized) {
+          // Cache the found user locally
+          saveUserToCloud(u);
+          return u;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[Firebase] findUserInCloud error:', err);
+  }
+
+  return null;
+}
+
 /**
- * Subscribes to global stars feed with real-time updates:
- * - Listens to Firebase Firestore `onSnapshot` when configured
- * - Listens to `BroadcastChannel` events across windows and devices
+ * --------------------------------------------------------------------------------
+ * STARS CLOUD INTEGRATION & MULTIPLAYER SYNC
+ * --------------------------------------------------------------------------------
  */
+
+export function getCachedStars(): StarNode[] {
+  try {
+    const raw = localStorage.getItem(STARS_CACHE_KEY) || localStorage.getItem(LEGACY_STARS_CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+export function cacheStars(stars: StarNode[]) {
+  try {
+    const payload = JSON.stringify(stars);
+    localStorage.setItem(STARS_CACHE_KEY, payload);
+    localStorage.setItem(LEGACY_STARS_CACHE_KEY, payload);
+  } catch {
+    // ignore
+  }
+}
+
 export function subscribeGlobalStars(onUpdate: (stars: StarNode[]) => void): () => void {
   const db = getFirebaseFirestore();
 
-  // If Firebase is configured, subscribe to Firestore real-time collection
   if (db) {
     try {
       const starsCol = collection(db, 'stars');
@@ -133,11 +344,18 @@ export function subscribeGlobalStars(onUpdate: (stars: StarNode[]) => void): () 
             return timeB - timeA;
           });
 
-          cacheStars(cloudStars);
-          onUpdate(cloudStars);
+          // Merge with any local unsynced stars
+          const localStars = getCachedStars();
+          const starMap = new Map<string, StarNode>();
+          localStars.forEach(s => starMap.set(s.id, s));
+          cloudStars.forEach(s => starMap.set(s.id, s));
+          const merged = Array.from(starMap.values());
+
+          cacheStars(merged);
+          onUpdate(merged);
         },
         (error) => {
-          // On Firestore error fallback to cached stars
+          console.warn('[Firebase] stars onSnapshot error:', error);
           onUpdate(getCachedStars());
         }
       );
@@ -150,7 +368,7 @@ export function subscribeGlobalStars(onUpdate: (stars: StarNode[]) => void): () 
     }
   }
 
-  // Fallback: Cross-tab Real-time BroadcastChannel & Local Event Listener
+  // Cross-tab Real-time BroadcastChannel & Local Event Listener
   const handleBroadcast = (event: MessageEvent) => {
     if (event.data?.type === 'STARS_UPDATED' && Array.isArray(event.data.stars)) {
       cacheStars(event.data.stars);
@@ -181,9 +399,6 @@ export function subscribeGlobalStars(onUpdate: (stars: StarNode[]) => void): () 
   };
 }
 
-/**
- * Saves a new star to the global database and broadcasts to all clients
- */
 export async function saveStarToCloud(star: StarNode, currentStars: StarNode[]): Promise<void> {
   const updatedStars = [star, ...currentStars.filter((s) => s.id !== star.id)];
   cacheStars(updatedStars);
@@ -203,15 +418,12 @@ export async function saveStarToCloud(star: StarNode, currentStars: StarNode[]):
         ...star,
         updatedAt: new Date().toISOString(),
       });
-    } catch {
-      // silent catch for resilient local-first experience
+    } catch (err) {
+      console.warn('[Firebase] saveStarToCloud error:', err);
     }
   }
 }
 
-/**
- * Updates a star in the global database (e.g. like, reignite, reform)
- */
 export async function updateStarInCloud(
   starId: string, 
   updates: Partial<StarNode>, 
@@ -243,16 +455,13 @@ export async function updateStarInCloud(
           const starRef = doc(db, 'stars', starId);
           await setDoc(starRef, { ...fullStar, updatedAt: new Date().toISOString() });
         }
-      } catch {
-        // ignore
+      } catch (err) {
+        console.warn('[Firebase] updateStarInCloud error:', err);
       }
     }
   }
 }
 
-/**
- * Deletes a star from the global database
- */
 export async function deleteStarFromCloud(starId: string, currentStars: StarNode[]): Promise<void> {
   const updatedStars = currentStars.filter((s) => s.id !== starId);
   cacheStars(updatedStars);
@@ -267,8 +476,8 @@ export async function deleteStarFromCloud(starId: string, currentStars: StarNode
     try {
       const starRef = doc(db, 'stars', starId);
       await deleteDoc(starRef);
-    } catch {
-      // ignore
+    } catch (err) {
+      console.warn('[Firebase] deleteStarFromCloud error:', err);
     }
   }
 }
@@ -281,7 +490,7 @@ export async function deleteStarFromCloud(starId: string, currentStars: StarNode
 
 export function getCachedStories(): StarStory[] {
   try {
-    const raw = localStorage.getItem(STORIES_CACHE_KEY);
+    const raw = localStorage.getItem(STORIES_CACHE_KEY) || localStorage.getItem(LEGACY_STORIES_CACHE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
@@ -297,7 +506,9 @@ export function getCachedStories(): StarStory[] {
 
 export function cacheStories(stories: StarStory[]) {
   try {
-    localStorage.setItem(STORIES_CACHE_KEY, JSON.stringify(stories));
+    const payload = JSON.stringify(stories);
+    localStorage.setItem(STORIES_CACHE_KEY, payload);
+    localStorage.setItem(LEGACY_STORIES_CACHE_KEY, payload);
   } catch {
     // ignore
   }
@@ -325,6 +536,7 @@ export function subscribeGlobalStories(onUpdate: (stories: StarStory[]) => void)
           onUpdate(cloudStories);
         },
         (error) => {
+          console.warn('[Firebase] stories onSnapshot error:', error);
           onUpdate(getCachedStories());
         }
       );
@@ -380,8 +592,8 @@ export async function saveStoryToCloud(story: StarStory, currentStories: StarSto
     try {
       const storyRef = doc(db, 'stories', story.id);
       await setDoc(storyRef, story);
-    } catch {
-      // ignore
+    } catch (err) {
+      console.warn('[Firebase] saveStoryToCloud error:', err);
     }
   }
 }
@@ -400,8 +612,8 @@ export async function deleteStoryFromCloud(storyId: string, currentStories: Star
     try {
       const storyRef = doc(db, 'stories', storyId);
       await deleteDoc(storyRef);
-    } catch {
-      // ignore
+    } catch (err) {
+      console.warn('[Firebase] deleteStoryFromCloud error:', err);
     }
   }
 }
@@ -433,8 +645,8 @@ export async function markStoryViewedInCloud(
       if (target) {
         await updateDoc(storyRef, { viewers: target.viewers });
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      console.warn('[Firebase] markStoryViewedInCloud error:', err);
     }
   }
 }
@@ -495,6 +707,7 @@ export function subscribeGlobalGalaxies(onUpdate: (galaxies: Galaxy[]) => void):
           onUpdate(mergedGalaxies);
         },
         (error) => {
+          console.warn('[Firebase] galaxies onSnapshot error:', error);
           onUpdate(getCachedGalaxies());
         }
       );
@@ -560,8 +773,8 @@ export async function saveGalaxyToCloud(galaxy: Galaxy, currentGalaxies: Galaxy[
     try {
       const galaxyRef = doc(db, 'galaxies', galaxy.id);
       await setDoc(galaxyRef, galaxy);
-    } catch {
-      // ignore
+    } catch (err) {
+      console.warn('[Firebase] saveGalaxyToCloud error:', err);
     }
   }
 }
@@ -601,12 +814,150 @@ export async function toggleJoinGalaxyInCloud(
         const galaxyRef = doc(db, 'galaxies', galaxyId);
         await updateDoc(galaxyRef, { memberIds: target.memberIds });
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      console.warn('[Firebase] toggleJoinGalaxyInCloud error:', err);
     }
   }
 
   return updatedGalaxies;
+}
+
+/**
+ * --------------------------------------------------------------------------------
+ * CLOUD DATA MIGRATION & BIDIRECTIONAL SYNC ON STARTUP
+ * --------------------------------------------------------------------------------
+ * Automatically pushes pre-existing local storage stars and users up to Firestore
+ * and downloads any new remote stars/users so no data is isolated or stuck locally.
+ */
+export async function syncLocalDataToCloud(): Promise<{
+  stars: StarNode[];
+  stories: StarStory[];
+  galaxies: Galaxy[];
+  users: User[];
+}> {
+  const localStars = getCachedStars();
+  const localStories = getCachedStories();
+  const localGalaxies = getCachedGalaxies();
+  const localUsers = getCachedUsers();
+
+  const db = getFirebaseFirestore();
+  if (!db) {
+    return {
+      stars: localStars,
+      stories: localStories,
+      galaxies: localGalaxies,
+      users: localUsers,
+    };
+  }
+
+  try {
+    // 1. Fetch all Firestore documents
+    const [starsSnap, storiesSnap, galaxiesSnap, usersSnap] = await Promise.all([
+      getDocs(collection(db, 'stars')),
+      getDocs(collection(db, 'stories')),
+      getDocs(collection(db, 'galaxies')),
+      getDocs(collection(db, 'users')),
+    ]);
+
+    const cloudStarsMap = new Map<string, StarNode>();
+    starsSnap.forEach((docSnap) => {
+      const data = docSnap.data() as StarNode;
+      if (data && data.id) cloudStarsMap.set(data.id, data);
+    });
+
+    const now = new Date().toISOString();
+    const cloudStoriesMap = new Map<string, StarStory>();
+    storiesSnap.forEach((docSnap) => {
+      const data = docSnap.data() as StarStory;
+      if (data && data.id && data.expiresAt > now) cloudStoriesMap.set(data.id, data);
+    });
+
+    const cloudGalaxiesMap = new Map<string, Galaxy>();
+    INITIAL_GALAXIES.forEach((g) => cloudGalaxiesMap.set(g.id, g));
+    galaxiesSnap.forEach((docSnap) => {
+      const data = docSnap.data() as Galaxy;
+      if (data && data.id) cloudGalaxiesMap.set(data.id, data);
+    });
+
+    const cloudUsersMap = new Map<string, User>();
+    usersSnap.forEach((docSnap) => {
+      const data = docSnap.data() as User;
+      if (data && data.id) cloudUsersMap.set(data.id, data);
+    });
+
+    // 2. Upload any local stars that are missing from cloud (Pre-backend creations)
+    const uploadStarPromises: Promise<void>[] = [];
+    localStars.forEach((star) => {
+      if (!cloudStarsMap.has(star.id)) {
+        cloudStarsMap.set(star.id, star);
+        uploadStarPromises.push(
+          setDoc(doc(db, 'stars', star.id), {
+            ...star,
+            updatedAt: new Date().toISOString(),
+          }).catch((e) => console.warn('Star upload error:', e))
+        );
+      }
+    });
+
+    // 3. Upload any local users that are missing from cloud (Pre-backend accounts)
+    const uploadUserPromises: Promise<void>[] = [];
+    localUsers.forEach((user) => {
+      if (user && user.id && !user.isGuest && !cloudUsersMap.has(user.id)) {
+        cloudUsersMap.set(user.id, user);
+        uploadUserPromises.push(
+          setDoc(doc(db, 'users', user.id), {
+            ...user,
+            updatedAt: new Date().toISOString(),
+          }).catch((e) => console.warn('User upload error:', e))
+        );
+      }
+    });
+
+    // 4. Upload any local stories that are missing from cloud
+    const uploadStoryPromises: Promise<void>[] = [];
+    localStories.forEach((story) => {
+      if (story && story.id && story.expiresAt > now && !cloudStoriesMap.has(story.id)) {
+        cloudStoriesMap.set(story.id, story);
+        uploadStoryPromises.push(
+          setDoc(doc(db, 'stories', story.id), story).catch((e) => console.warn('Story upload error:', e))
+        );
+      }
+    });
+
+    // Run background uploads
+    Promise.all([...uploadStarPromises, ...uploadUserPromises, ...uploadStoryPromises]).catch(() => {});
+
+    // 5. Build merged results
+    const finalStars = Array.from(cloudStarsMap.values()).sort((a, b) => {
+      const timeA = new Date(a.createdAt).getTime() || 0;
+      const timeB = new Date(b.createdAt).getTime() || 0;
+      return timeB - timeA;
+    });
+    const finalStories = Array.from(cloudStoriesMap.values());
+    const finalGalaxies = Array.from(cloudGalaxiesMap.values());
+    const finalUsers = Array.from(cloudUsersMap.values());
+
+    // 6. Update local caches
+    cacheStars(finalStars);
+    cacheStories(finalStories);
+    cacheGalaxies(finalGalaxies);
+    cacheUsers(finalUsers);
+
+    return {
+      stars: finalStars,
+      stories: finalStories,
+      galaxies: finalGalaxies,
+      users: finalUsers,
+    };
+  } catch (err) {
+    console.warn('[Firebase] syncLocalDataToCloud error:', err);
+    return {
+      stars: localStars,
+      stories: localStories,
+      galaxies: localGalaxies,
+      users: localUsers,
+    };
+  }
 }
 
 /**
@@ -616,61 +967,7 @@ export async function fetchGlobalCosmosFeed(): Promise<{
   stars: StarNode[];
   stories: StarStory[];
   galaxies: Galaxy[];
+  users: User[];
 }> {
-  const db = getFirebaseFirestore();
-  if (!db) {
-    return {
-      stars: getCachedStars(),
-      stories: getCachedStories(),
-      galaxies: getCachedGalaxies(),
-    };
-  }
-
-  try {
-    const [starsSnap, storiesSnap, galaxiesSnap] = await Promise.all([
-      getDocs(collection(db, 'stars')),
-      getDocs(collection(db, 'stories')),
-      getDocs(collection(db, 'galaxies')),
-    ]);
-
-    const stars: StarNode[] = [];
-    starsSnap.forEach((docSnap) => {
-      const data = docSnap.data() as StarNode;
-      if (data && data.id) stars.push(data);
-    });
-
-    const now = new Date().toISOString();
-    const stories: StarStory[] = [];
-    storiesSnap.forEach((docSnap) => {
-      const data = docSnap.data() as StarStory;
-      if (data && data.id && data.expiresAt > now) stories.push(data);
-    });
-
-    const galaxyMap = new Map<string, Galaxy>();
-    INITIAL_GALAXIES.forEach((g) => galaxyMap.set(g.id, g));
-    galaxiesSnap.forEach((docSnap) => {
-      const data = docSnap.data() as Galaxy;
-      if (data && data.id) galaxyMap.set(data.id, data);
-    });
-
-    const finalStars = stars.length > 0 ? stars : getCachedStars();
-    const finalStories = stories.length > 0 ? stories : getCachedStories();
-    const finalGalaxies = Array.from(galaxyMap.values());
-
-    cacheStars(finalStars);
-    cacheStories(finalStories);
-    cacheGalaxies(finalGalaxies);
-
-    return {
-      stars: finalStars,
-      stories: finalStories,
-      galaxies: finalGalaxies,
-    };
-  } catch {
-    return {
-      stars: getCachedStars(),
-      stories: getCachedStories(),
-      galaxies: getCachedGalaxies(),
-    };
-  }
+  return syncLocalDataToCloud();
 }
