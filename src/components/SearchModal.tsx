@@ -22,7 +22,7 @@ import { getClusterTheme, getDefaultUniverseGlow } from '../utils/colorPalette';
 import { isStarLikedByUser, getStarLikesCount } from '../utils/likesHelper';
 import { getStoredUniverses } from '../utils/universeRegistry';
 import { subscribeGlobalUsers } from '../services/cloudDatabase';
-import { getFirebaseFirestore, collection, onSnapshot, getDocs } from '../services/firebase';
+import { db, getFirebaseFirestore, collection, onSnapshot, getDocs } from '../services/firebase';
 import { AuthMode } from './AuthModal';
 import { TERMS } from '../constants/terminology';
 
@@ -97,29 +97,32 @@ export const SearchModal: React.FC<SearchModalProps> = ({
   useEffect(() => {
     if (!isOpen) return;
 
-    // 1. Subscribe to real-time users updates
+    // 1. Subscribe to real-time users updates via cloudDatabase service
     const unsubscribe = subscribeGlobalUsers((updated) => {
-      if (Array.isArray(updated) && updated.length > 0) {
+      if (Array.isArray(updated)) {
         setLiveUsers(updated);
       }
     });
 
-    // 2. Direct query to global Firestore 'users' collection to guarantee all teammates are retrieved
-    const db = getFirebaseFirestore();
+    // 2. Direct query & real-time snapshot to global Firestore 'users' collection
+    const firestoreDb = db || getFirebaseFirestore();
     let unsubscribeSnap: (() => void) | null = null;
-    if (db) {
+    if (firestoreDb) {
       try {
-        const usersCol = collection(db, 'users');
-        unsubscribeSnap = onSnapshot(
-          usersCol,
-          (snap) => {
+        console.log('[Firebase] [SearchModal] Querying global "users" collection in Firestore...');
+        const usersCol = collection(firestoreDb, 'users');
+
+        // Immediate one-time fetch
+        getDocs(usersCol)
+          .then((snap) => {
             const fetched: User[] = [];
             snap.forEach((d) => {
               const u = d.data() as User;
-              if (u && u.id && !u.isGuest) {
-                fetched.push(u);
+              if (u && (u.id || d.id) && !u.isGuest) {
+                fetched.push({ ...u, id: u.id || d.id });
               }
             });
+            console.log(`[Firebase] [SearchModal] getDocs returned ${fetched.length} users from "users" collection.`);
             if (fetched.length > 0) {
               setLiveUsers((prev) => {
                 const map = new Map<string, User>();
@@ -128,12 +131,36 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                 return Array.from(map.values());
               });
             }
+          })
+          .catch((err) => {
+            console.error('[Firebase] [SearchModal] getDocs error on "users" collection:', err);
+          });
+
+        // Real-time onSnapshot listener
+        unsubscribeSnap = onSnapshot(
+          usersCol,
+          (snap) => {
+            const fetched: User[] = [];
+            snap.forEach((d) => {
+              const u = d.data() as User;
+              if (u && (u.id || d.id) && !u.isGuest) {
+                fetched.push({ ...u, id: u.id || d.id });
+              }
+            });
+            console.log(`[Firebase] [SearchModal] onSnapshot received ${fetched.length} users.`);
+            if (fetched.length > 0) {
+              setLiveUsers(fetched);
+            }
           },
-          (err) => console.warn('[SearchModal] users listener error:', err)
+          (err) => {
+            console.error('[Firebase] [SearchModal] onSnapshot listener error on "users" collection:', err);
+          }
         );
       } catch (err) {
-        console.warn('[SearchModal] Firestore setup error:', err);
+        console.error('[Firebase] [SearchModal] Firestore setup error:', err);
       }
+    } else {
+      console.warn('[Firebase] [SearchModal] Firestore instance is not initialized. Using local users cache.');
     }
 
     return () => {

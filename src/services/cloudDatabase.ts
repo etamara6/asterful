@@ -44,7 +44,7 @@ try {
 
 export interface CloudStatus {
   isConnected: boolean;
-  provider: 'firebase' | 'supabase' | 'mesh-sync';
+  provider: 'firebase' | 'mesh-sync';
   providerName: string;
   details: string;
   projectId?: string;
@@ -62,21 +62,11 @@ export function getCloudStatus(): CloudStatus {
     };
   }
 
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-  if (supabaseUrl) {
-    return {
-      isConnected: true,
-      provider: 'supabase',
-      providerName: 'Supabase Realtime Cloud',
-      details: `Connected to Supabase endpoint (${supabaseUrl}).`,
-    };
-  }
-
   return {
     isConnected: false,
     provider: 'mesh-sync',
-    providerName: 'Cosmic Multiplayer Sync Mesh',
-    details: 'Multiplayer cross-tab live sync bus active. Add Firebase or Supabase keys to connect live cloud backend.',
+    providerName: 'Firebase Firestore (Configuration Pending)',
+    details: 'Add your Firebase configuration keys to .env to connect the live Firestore database.',
   };
 }
 
@@ -115,6 +105,7 @@ export function subscribeGlobalUsers(onUpdate: (users: User[]) => void): () => v
 
   if (firestoreDb) {
     try {
+      console.log('[Firebase] Attaching real-time onSnapshot listener to "users" collection...');
       const usersCol = collection(firestoreDb, 'users');
       unsubscribeFirestore = onSnapshot(
         usersCol,
@@ -122,12 +113,14 @@ export function subscribeGlobalUsers(onUpdate: (users: User[]) => void): () => v
           const cloudUsers: User[] = [];
           snapshot.forEach((docSnap) => {
             const data = docSnap.data() as User;
-            if (data && data.id && !data.isGuest) {
-              cloudUsers.push(data);
+            const uid = data.id || (data as any).uid || docSnap.id;
+            if (data && uid && !data.isGuest) {
+              cloudUsers.push({ ...data, id: uid });
             }
           });
+          console.log(`[Firebase] users onSnapshot received ${snapshot.docs.length} user documents.`);
 
-          // If we have cloud users, prioritize them as source of truth while keeping any pending local accounts
+          // Prioritize cloud users as source of truth
           const localUsers = getCachedUsers();
           const mergedMap = new Map<string, User>();
           localUsers.forEach(u => mergedMap.set(u.id, u));
@@ -145,6 +138,8 @@ export function subscribeGlobalUsers(onUpdate: (users: User[]) => void): () => v
     } catch (err) {
       console.error('[Firebase] Failed to attach users snapshot listener:', err);
     }
+  } else {
+    console.warn('[Firebase] subscribeGlobalUsers: Firestore instance not available.');
   }
 
   // Cross-tab broadcast listener
@@ -183,14 +178,15 @@ export function subscribeGlobalUsers(onUpdate: (users: User[]) => void): () => v
 export async function saveUserToCloud(user: User): Promise<void> {
   if (!user || user.isGuest) return;
 
+  const userId = (user as any).uid || user.id;
   const currentUsers = getCachedUsers();
-  const index = currentUsers.findIndex(u => u.id === user.id);
+  const index = currentUsers.findIndex(u => u.id === userId || (u as any).uid === userId);
   let updatedUsers: User[];
   if (index >= 0) {
     updatedUsers = [...currentUsers];
-    updatedUsers[index] = { ...updatedUsers[index], ...user };
+    updatedUsers[index] = { ...updatedUsers[index], ...user, id: userId };
   } else {
-    updatedUsers = [...currentUsers, user];
+    updatedUsers = [...currentUsers, { ...user, id: userId }];
   }
 
   cacheUsers(updatedUsers);
@@ -203,9 +199,11 @@ export async function saveUserToCloud(user: User): Promise<void> {
   try {
     const firestoreDb = db || getFirebaseFirestore();
     if (firestoreDb) {
-      const userRef = doc(firestoreDb, 'users', user.id);
+      console.log('[Firebase] Saving user profile to Firestore "users" collection with setDoc for ID:', userId);
+      const userRef = doc(firestoreDb, 'users', userId);
       const userPayload = {
-        id: user.id,
+        id: userId,
+        uid: userId,
         email: (user.email || '').trim().toLowerCase(),
         displayName: user.displayName || user.username || '',
         username: (user.username || '').replace(/^@/, ''),
@@ -226,9 +224,9 @@ export async function saveUserToCloud(user: User): Promise<void> {
         updatedAt: new Date().toISOString(),
       };
       await setDoc(userRef, userPayload, { merge: true });
-      console.log('[Firebase] User profile saved to users collection via setDoc:', user.id);
+      console.log('[Firebase] Successfully saved user profile to Firestore "users" collection (setDoc):', userId);
     } else {
-      console.warn('[Firebase] Firestore db is not initialized. Please verify Firebase environment variables in .env.');
+      console.warn('[Firebase] Firestore db is not initialized. Please verify Firebase environment variables.');
     }
   } catch (error) {
     console.error('[Firebase] Failed to write user profile to Firestore "users" collection:', error);
@@ -578,11 +576,13 @@ export function subscribeGlobalStars(onUpdate: (stars: StarNode[]) => void): () 
 
   if (firestoreDb) {
     try {
+      console.log('[Firebase] Attaching real-time onSnapshot listeners to Firestore "stars" and "posts" collections...');
       // 1. Subscribe to 'stars' collection
       const starsCol = collection(firestoreDb, 'stars');
       unsubscribeStars = onSnapshot(
         starsCol,
         (snapshot) => {
+          console.log(`[Firebase] stars onSnapshot received ${snapshot.docs.length} documents from Firestore.`);
           snapshot.forEach((docSnap) => {
             const data = docSnap.data() as StarNode;
             const starId = data.id || docSnap.id;
@@ -603,6 +603,7 @@ export function subscribeGlobalStars(onUpdate: (stars: StarNode[]) => void): () 
       unsubscribePosts = onSnapshot(
         postsCol,
         (snapshot) => {
+          console.log(`[Firebase] posts onSnapshot received ${snapshot.docs.length} documents from Firestore.`);
           snapshot.forEach((docSnap) => {
             const data = docSnap.data() as StarNode;
             const starId = data.id || docSnap.id;
@@ -626,6 +627,8 @@ export function subscribeGlobalStars(onUpdate: (stars: StarNode[]) => void): () 
     } catch (err) {
       console.error('[Firebase] Failed to attach stars/posts snapshot listeners:', err);
     }
+  } else {
+    console.warn('[Firebase] subscribeGlobalStars: Firestore instance not available.');
   }
 
   // Cross-tab Real-time BroadcastChannel & Local Event Listener
@@ -675,33 +678,42 @@ export async function saveStarToCloud(star: StarNode, currentStars: StarNode[]):
   }
   window.dispatchEvent(new CustomEvent('asterful_stars_synced', { detail: { stars: updatedStars } }));
 
-  // Write to Firebase Firestore in global 'posts' collection with addDoc and 'stars' collection with setDoc
+  // Write to Firebase Firestore in global 'stars' collection with addDoc and setDoc, and 'posts' with addDoc
   try {
     const firestoreDb = db || getFirebaseFirestore();
     if (firestoreDb) {
+      console.log('[Firebase] Saving new star to Firestore collections "stars" and "posts":', star.id, 'title:', star.title);
       const postPayload = {
         ...star,
         createdAt: star.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
 
-      // 1. Add to global 'posts' collection using addDoc
-      const postsCol = collection(firestoreDb, 'posts');
-      const postDocRef = await addDoc(postsCol, postPayload);
-      console.log('[Firebase] Post added to global posts collection with addDoc (ID:', postDocRef.id, ')');
+      // 1. Add to global 'stars' collection using addDoc
+      const starsCol = collection(firestoreDb, 'stars');
+      const starDocRef = await addDoc(starsCol, postPayload);
+      console.log('[Firebase] Star added to "stars" collection with addDoc (Doc ID:', starDocRef.id, ')');
 
-      // 2. Save to 'stars' collection using setDoc with star.id
+      // 2. Save directly to 'stars' collection doc indexed by star.id
       const starRef = doc(firestoreDb, 'stars', star.id);
       await setDoc(starRef, {
         ...postPayload,
-        postId: postDocRef.id,
+        docId: starDocRef.id,
       }, { merge: true });
-      console.log('[Firebase] Star saved to stars collection with setDoc:', star.id);
+      console.log('[Firebase] Star indexed in "stars" collection with setDoc:', star.id);
+
+      // 3. Add to global 'posts' collection using addDoc
+      const postsCol = collection(firestoreDb, 'posts');
+      const postDocRef = await addDoc(postsCol, {
+        ...postPayload,
+        starId: star.id,
+      });
+      console.log('[Firebase] Post added to global "posts" collection with addDoc (ID:', postDocRef.id, ')');
     } else {
-      console.warn('[Firebase] Firestore db is not initialized. Please check Firebase environment configuration.');
+      console.warn('[Firebase] Firestore db is not initialized. Please verify Firebase configuration in .env.');
     }
   } catch (error) {
-    console.error('[Firebase] Failed to write post/star to Firestore:', error);
+    console.error('[Firebase] Failed to write star/post to Firestore:', error);
   }
 }
 

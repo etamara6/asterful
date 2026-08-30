@@ -699,9 +699,9 @@ export default function App() {
     };
 
     // If it's a remix, increment parent's remixCount
-    let updatedStars = [...stars];
+    let currentStarsList = stars;
     if (starData.parentId) {
-      updatedStars = updatedStars.map(s => {
+      currentStarsList = currentStarsList.map(s => {
         if (s.id === starData.parentId) {
           return { ...s, remixCount: s.remixCount + 1 };
         }
@@ -709,10 +709,10 @@ export default function App() {
       });
     }
 
-    // Add new star
-    updatedStars.push(newStar);
-    setStars(updatedStars);
-    saveStarToCloud(newStar, updatedStars);
+    // Persist new star to Firebase Firestore via addDoc / setDoc and broadcast to all clients
+    saveStarToCloud(newStar, currentStarsList).catch((err) => {
+      console.error('[Firebase] handleCreateStarSubmit error writing to Firestore:', err);
+    });
 
     // Select the new star and focus viewport on it
     setSelectedStarId(newStar.id);

@@ -10,6 +10,10 @@ import {
   cacheUsers 
 } from '../services/cloudDatabase';
 import {
+  db,
+  getFirebaseFirestore,
+  doc,
+  setDoc,
   getFirebaseAuth,
   deleteUser as firebaseDeleteUser,
   signInWithEmailAndPassword,
@@ -309,7 +313,40 @@ export async function registerUserAsync(user: User): Promise<RegisterResult> {
       };
     }
 
-    // 2. Persist to local cache and Cloud Firestore
+    // 2. Persist directly to Cloud Firestore 'users' collection and local cache
+    const firestoreDb = db || getFirebaseFirestore();
+    const userId = (user as any).uid || user.id;
+    if (firestoreDb) {
+      console.log('[Firebase] Registering user in Firestore "users" collection (setDoc) for UID:', userId);
+      const userRef = doc(firestoreDb, 'users', userId);
+      const userPayload = {
+        id: userId,
+        uid: userId,
+        email: (user.email || '').trim().toLowerCase(),
+        displayName: user.displayName || user.username || '',
+        username: (user.username || '').replace(/^@/, ''),
+        handle: user.handle ? (user.handle.startsWith('@') ? user.handle : `@${user.handle}`) : `@${user.username}`,
+        bio: user.bio || '',
+        avatarUrl: user.avatarUrl || '',
+        bannerUrl: user.bannerUrl || '',
+        joinedAt: user.joinedAt || new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+        glowColor: user.glowColor || '#FFD700',
+        followers: user.followers || [],
+        following: user.following || [],
+        savedStarIds: user.savedStarIds || [],
+        isPrivateSky: Boolean(user.isPrivateSky),
+        eclipsedUserIds: user.eclipsedUserIds || [],
+        orbitRequests: user.orbitRequests || [],
+        age: user.age,
+        isOver18: user.isOver18,
+        updatedAt: new Date().toISOString(),
+      };
+      await setDoc(userRef, userPayload, { merge: true });
+      console.log('[Firebase] User registration saved to Firestore "users" collection successfully:', userId);
+    } else {
+      console.warn('[Firebase] Firestore db is not initialized. Please verify Firebase environment variables in .env.');
+    }
+
     registerUser(user);
     await saveUserToCloud(user);
 
@@ -318,7 +355,7 @@ export async function registerUserAsync(user: User): Promise<RegisterResult> {
       user,
     };
   } catch (err) {
-    console.error('[UserRegistry] Error during registerUserAsync:', err);
+    console.error('[Firebase] Failed to write user profile during registration to Firestore "users" collection:', err);
     // Still save locally
     registerUser(user);
     return {
