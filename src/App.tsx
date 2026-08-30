@@ -154,7 +154,7 @@ export default function App() {
 
   // Calculate visible stories for current user based on privacy (PUBLIC vs FRIENDS_ONLY)
   const visibleStoriesList = useMemo(() => {
-    return getVisibleStories(currentUser?.id, currentUser?.following);
+    return getVisibleStories(currentUser?.id, currentUser?.following, stories);
   }, [stories, currentUser]);
 
   // Group stories by author
@@ -342,8 +342,9 @@ export default function App() {
     }, 4000);
   }, []);
 
-  // 2. Stars State with Fast Local-First Cache & Real-Time Cloud Synchronization
+  // 2. Stars & Users State with Fast Local-First Cache & Real-Time Cloud Synchronization
   const [stars, setStars] = useState<StarNode[]>(() => getCachedStars());
+  const [registeredUsers, setRegisteredUsers] = useState<User[]>(() => getAllRegisteredUsers());
 
   // Global Real-Time Cloud Database Feed & Multiplayer Sync on Load
   useEffect(() => {
@@ -357,7 +358,10 @@ export default function App() {
     });
 
     const unsubscribeUsers = subscribeGlobalUsers((updatedUsers) => {
-      setRegisteredUsersFromCloud(updatedUsers);
+      if (Array.isArray(updatedUsers) && updatedUsers.length > 0) {
+        setRegisteredUsers(updatedUsers);
+        setRegisteredUsersFromCloud(updatedUsers);
+      }
     });
 
     const unsubscribeGalaxies = subscribeGlobalGalaxies((updatedGalaxies) => {
@@ -374,6 +378,7 @@ export default function App() {
           setStories(cloudStories);
         }
         if (cloudUsers && cloudUsers.length > 0) {
+          setRegisteredUsers(cloudUsers);
           setRegisteredUsersFromCloud(cloudUsers);
         }
       })
@@ -671,7 +676,7 @@ export default function App() {
         handle: currentUser.handle.startsWith('@') ? currentUser.handle : `@${currentUser.handle}`,
         avatarUrl: currentUser?.avatarUrl,
       },
-      createdAt: 'Just now',
+      createdAt: new Date().toISOString(),
       visibility: starData.visibility,
       allowedUserIds: starData.allowedUserIds,
       cluster: starData.cluster,
@@ -1136,6 +1141,7 @@ export default function App() {
         isOpen={isSearchModalOpen}
         onClose={() => setIsSearchModalOpen(false)}
         stars={visibleStars}
+        allUsers={registeredUsers}
         currentUser={currentUser}
         initialQuery={searchModalInitialQuery}
         initialCategory={searchModalCategory}

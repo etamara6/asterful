@@ -77,8 +77,12 @@ export function getAllStories(): StarStory[] {
  *   - Current user is the author
  *   - Current user follows/is in orbit with the author
  */
-export function getVisibleStories(currentUserId?: string, followingIds: string[] = []): StarStory[] {
-  const all = getAllStories();
+export function getVisibleStories(
+  currentUserId?: string, 
+  followingIds: string[] = [], 
+  storiesSource?: StarStory[]
+): StarStory[] {
+  const all = Array.isArray(storiesSource) && storiesSource.length > 0 ? storiesSource : getAllStories();
   if (!currentUserId) {
     return all.filter((s) => s.privacy === 'PUBLIC');
   }

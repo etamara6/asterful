@@ -120,21 +120,20 @@ export function subscribeGlobalUsers(onUpdate: (users: User[]) => void): () => v
           const cloudUsers: User[] = [];
           snapshot.forEach((docSnap) => {
             const data = docSnap.data() as User;
-            if (data && data.id) {
+            if (data && data.id && !data.isGuest) {
               cloudUsers.push(data);
             }
           });
 
-          if (cloudUsers.length > 0) {
-            // Merge with any cached users that may not have synced yet
-            const localUsers = getCachedUsers();
-            const mergedMap = new Map<string, User>();
-            localUsers.forEach(u => mergedMap.set(u.id, u));
-            cloudUsers.forEach(u => mergedMap.set(u.id, u));
-            const merged = Array.from(mergedMap.values());
-            cacheUsers(merged);
-            onUpdate(merged);
-          }
+          // If we have cloud users, prioritize them as source of truth while keeping any pending local accounts
+          const localUsers = getCachedUsers();
+          const mergedMap = new Map<string, User>();
+          localUsers.forEach(u => mergedMap.set(u.id, u));
+          cloudUsers.forEach(u => mergedMap.set(u.id, u));
+          const merged = Array.from(mergedMap.values());
+
+          cacheUsers(merged);
+          onUpdate(merged);
         },
         (error) => {
           console.warn('[Firebase] users onSnapshot error:', error);

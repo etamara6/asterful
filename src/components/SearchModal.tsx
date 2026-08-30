@@ -21,6 +21,8 @@ import { getAllRegisteredUsers, generateCleanHandle } from '../utils/userRegistr
 import { getClusterTheme, getDefaultUniverseGlow } from '../utils/colorPalette';
 import { isStarLikedByUser, getStarLikesCount } from '../utils/likesHelper';
 import { getStoredUniverses } from '../utils/universeRegistry';
+import { subscribeGlobalUsers } from '../services/cloudDatabase';
+import { getFirebaseFirestore, collection, onSnapshot, getDocs } from '../services/firebase';
 import { AuthMode } from './AuthModal';
 import { TERMS } from '../constants/terminology';
 
@@ -42,6 +44,7 @@ interface SearchModalProps {
   isOpen: boolean;
   onClose: () => void;
   stars: StarNode[];
+  allUsers?: User[];
   currentUser: User | null;
   initialQuery?: string;
   initialCategory?: SearchCategory;
@@ -57,6 +60,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
   isOpen,
   onClose,
   stars,
+  allUsers: initialUsersProp,
   currentUser,
   initialQuery = '',
   initialCategory = 'all',
@@ -70,6 +74,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
   const [query, setQuery] = useState(initialQuery);
   const [activeTab, setActiveTab] = useState<SearchCategory>(initialCategory);
   const [hoveredFollowId, setHoveredFollowId] = useState<string | null>(null);
+  const [liveUsers, setLiveUsers] = useState<User[]>(() => initialUsersProp || getAllRegisteredUsers());
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Sync initial query when opened
@@ -80,6 +85,62 @@ export const SearchModal: React.FC<SearchModalProps> = ({
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [isOpen, initialQuery, initialCategory]);
+
+  // Sync when prop updates
+  useEffect(() => {
+    if (initialUsersProp && initialUsersProp.length > 0) {
+      setLiveUsers(initialUsersProp);
+    }
+  }, [initialUsersProp]);
+
+  // Real-time Global Users Listener & Query on Open
+  useEffect(() => {
+    if (!isOpen) return;
+
+    // 1. Subscribe to real-time users updates
+    const unsubscribe = subscribeGlobalUsers((updated) => {
+      if (Array.isArray(updated) && updated.length > 0) {
+        setLiveUsers(updated);
+      }
+    });
+
+    // 2. Direct query to global Firestore 'users' collection to guarantee all teammates are retrieved
+    const db = getFirebaseFirestore();
+    let unsubscribeSnap: (() => void) | null = null;
+    if (db) {
+      try {
+        const usersCol = collection(db, 'users');
+        unsubscribeSnap = onSnapshot(
+          usersCol,
+          (snap) => {
+            const fetched: User[] = [];
+            snap.forEach((d) => {
+              const u = d.data() as User;
+              if (u && u.id && !u.isGuest) {
+                fetched.push(u);
+              }
+            });
+            if (fetched.length > 0) {
+              setLiveUsers((prev) => {
+                const map = new Map<string, User>();
+                prev.forEach((item) => map.set(item.id, item));
+                fetched.forEach((item) => map.set(item.id, item));
+                return Array.from(map.values());
+              });
+            }
+          },
+          (err) => console.warn('[SearchModal] users listener error:', err)
+        );
+      } catch (err) {
+        console.warn('[SearchModal] Firestore setup error:', err);
+      }
+    }
+
+    return () => {
+      unsubscribe();
+      if (unsubscribeSnap) unsubscribeSnap();
+    };
+  }, [isOpen]);
 
   // Handle ESC key
   useEffect(() => {
@@ -92,21 +153,20 @@ export const SearchModal: React.FC<SearchModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
-  // 1. SOURCED USERS (Strictly dynamic with empty fallback)
+  // 1. SOURCED USERS (Strictly dynamic from live cloud database + registered users)
   const allUsers = useMemo(() => {
-    try {
-      const stored = localStorage.getItem('asterful_registered_users') || localStorage.getItem('asterful_users');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) {
-          return parsed;
-        }
+    const usersMap = new Map<string, User>();
+    liveUsers.forEach((u) => {
+      if (u && u.id && !u.isGuest) usersMap.set(u.id, u);
+    });
+    const fromRegistry = getAllRegisteredUsers();
+    fromRegistry.forEach((u) => {
+      if (u && u.id && !u.isGuest && !usersMap.has(u.id)) {
+        usersMap.set(u.id, u);
       }
-    } catch {
-      // ignore
-    }
-    return getAllRegisteredUsers();
-  }, [isOpen, currentUser]);
+    });
+    return Array.from(usersMap.values());
+  }, [liveUsers]);
 
   // 2. SOURCED UNIVERSES (Strictly dynamic from custom universes and actual stars)
   const allUniverses: UniverseItem[] = useMemo(() => {
