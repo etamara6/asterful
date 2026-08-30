@@ -4,11 +4,13 @@ import { Galaxy } from '../types/galaxy';
 import { User } from '../types';
 import { INITIAL_GALAXIES } from '../utils/galaxyRegistry';
 import { 
+  db,
   getFirebaseFirestore, 
   isFirebaseConfigured, 
   collection, 
   doc, 
   setDoc, 
+  addDoc,
   getDocs, 
   getDoc,
   deleteDoc, 
@@ -109,11 +111,11 @@ export function cacheUsers(users: User[]) {
 
 export function subscribeGlobalUsers(onUpdate: (users: User[]) => void): () => void {
   let unsubscribeFirestore: Unsubscribe | null = null;
-  const db = getFirebaseFirestore();
+  const firestoreDb = db || getFirebaseFirestore();
 
-  if (db) {
+  if (firestoreDb) {
     try {
-      const usersCol = collection(db, 'users');
+      const usersCol = collection(firestoreDb, 'users');
       unsubscribeFirestore = onSnapshot(
         usersCol,
         (snapshot) => {
@@ -136,12 +138,12 @@ export function subscribeGlobalUsers(onUpdate: (users: User[]) => void): () => v
           onUpdate(merged);
         },
         (error) => {
-          console.warn('[Firebase] users onSnapshot error:', error);
+          console.error('[Firebase] users onSnapshot listener error:', error);
           onUpdate(getCachedUsers());
         }
       );
-    } catch {
-      // Fallback
+    } catch (err) {
+      console.error('[Firebase] Failed to attach users snapshot listener:', err);
     }
   }
 
@@ -198,17 +200,38 @@ export async function saveUserToCloud(user: User): Promise<void> {
   }
   window.dispatchEvent(new CustomEvent('asterful_users_synced', { detail: { users: updatedUsers } }));
 
-  const db = getFirebaseFirestore();
-  if (db) {
-    try {
-      const userRef = doc(db, 'users', user.id);
-      await setDoc(userRef, {
-        ...user,
+  try {
+    const firestoreDb = db || getFirebaseFirestore();
+    if (firestoreDb) {
+      const userRef = doc(firestoreDb, 'users', user.id);
+      const userPayload = {
+        id: user.id,
+        email: (user.email || '').trim().toLowerCase(),
+        displayName: user.displayName || user.username || '',
+        username: (user.username || '').replace(/^@/, ''),
+        handle: user.handle ? (user.handle.startsWith('@') ? user.handle : `@${user.handle}`) : `@${user.username}`,
+        bio: user.bio || '',
+        avatarUrl: user.avatarUrl || '',
+        bannerUrl: user.bannerUrl || '',
+        joinedAt: user.joinedAt || new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+        glowColor: user.glowColor || '#FFD700',
+        followers: user.followers || [],
+        following: user.following || [],
+        savedStarIds: user.savedStarIds || [],
+        isPrivateSky: Boolean(user.isPrivateSky),
+        eclipsedUserIds: user.eclipsedUserIds || [],
+        orbitRequests: user.orbitRequests || [],
+        age: user.age,
+        isOver18: user.isOver18,
         updatedAt: new Date().toISOString(),
-      });
-    } catch (err) {
-      console.warn('[Firebase] saveUserToCloud error:', err);
+      };
+      await setDoc(userRef, userPayload, { merge: true });
+      console.log('[Firebase] User profile saved to users collection via setDoc:', user.id);
+    } else {
+      console.warn('[Firebase] Firestore db is not initialized. Please verify Firebase environment variables in .env.');
     }
+  } catch (error) {
+    console.error('[Firebase] Failed to write user profile to Firestore "users" collection:', error);
   }
 }
 
@@ -224,26 +247,27 @@ export async function updateUserInCloud(userId: string, updates: Partial<User>):
   }
   window.dispatchEvent(new CustomEvent('asterful_users_synced', { detail: { users: updatedUsers } }));
 
-  const db = getFirebaseFirestore();
-  if (db) {
-    try {
-      const userRef = doc(db, 'users', userId);
-      await updateDoc(userRef, {
-        ...updates,
-        updatedAt: new Date().toISOString(),
-      });
-    } catch {
-      // If doc does not exist yet, fallback to setDoc
+  try {
+    const firestoreDb = db || getFirebaseFirestore();
+    if (firestoreDb) {
+      const userRef = doc(firestoreDb, 'users', userId);
       try {
+        await updateDoc(userRef, {
+          ...updates,
+          updatedAt: new Date().toISOString(),
+        });
+        console.log('[Firebase] User updated in users collection via updateDoc:', userId);
+      } catch {
+        // If doc does not exist yet, fallback to setDoc
         const fullUser = updatedUsers.find(u => u.id === userId);
         if (fullUser) {
-          const userRef = doc(db, 'users', userId);
-          await setDoc(userRef, { ...fullUser, updatedAt: new Date().toISOString() });
+          await setDoc(userRef, { ...fullUser, updatedAt: new Date().toISOString() }, { merge: true });
+          console.log('[Firebase] User created in users collection via fallback setDoc:', userId);
         }
-      } catch (err) {
-        console.warn('[Firebase] updateUserInCloud fallback error:', err);
       }
     }
+  } catch (error) {
+    console.error('[Firebase] Failed to update user profile in Firestore "users" collection:', error);
   }
 }
 
@@ -275,15 +299,15 @@ export async function deleteUserFromCloud(
   window.dispatchEvent(new CustomEvent('asterful_users_synced', { detail: { users: updatedUsers } }));
 
   // 2. Clean up from Firestore database
-  const db = getFirebaseFirestore();
-  if (db) {
+  const firestoreDb = db || getFirebaseFirestore();
+  if (firestoreDb) {
     try {
       // 2a. Delete direct user doc
-      const userRef = doc(db, 'users', userId);
-      await deleteDoc(userRef).catch(() => {});
+      const userRef = doc(firestoreDb, 'users', userId);
+      await deleteDoc(userRef).catch((e) => console.error('[Firebase] Error deleting user doc:', e));
 
       // 2b. Delete any other matching user docs (e.g. by email or handle)
-      const usersCol = collection(db, 'users');
+      const usersCol = collection(firestoreDb, 'users');
       const userSnapshots = await getDocs(usersCol);
       for (const docSnap of userSnapshots.docs) {
         const uData = docSnap.data() as User;
@@ -295,12 +319,12 @@ export async function deleteUserFromCloud(
           (normEmail && uEmail === normEmail) ||
           (normHandle && uHandle === normHandle)
         ) {
-          await deleteDoc(doc(db, 'users', docSnap.id)).catch(() => {});
+          await deleteDoc(doc(firestoreDb, 'users', docSnap.id)).catch((e) => console.error('[Firebase] Error deleting matching user doc:', e));
         }
       }
 
-      // 2c. Delete user's authored stars from Firestore
-      const starsCol = collection(db, 'stars');
+      // 2c. Delete user's authored stars & posts from Firestore
+      const starsCol = collection(firestoreDb, 'stars');
       const starSnapshots = await getDocs(starsCol);
       for (const starDoc of starSnapshots.docs) {
         const s = starDoc.data() as StarNode;
@@ -311,12 +335,28 @@ export async function deleteUserFromCloud(
           authorId === userId ||
           (normHandle && authorHandle === normHandle)
         ) {
-          await deleteDoc(doc(db, 'stars', starDoc.id)).catch(() => {});
+          await deleteDoc(doc(firestoreDb, 'stars', starDoc.id)).catch((e) => console.error('[Firebase] Error deleting user star:', e));
         }
       }
 
-      // 2d. Delete user's active stories from Firestore
-      const storiesCol = collection(db, 'stories');
+      // 2d. Delete user's authored posts from posts collection
+      const postsCol = collection(firestoreDb, 'posts');
+      const postSnapshots = await getDocs(postsCol);
+      for (const postDoc of postSnapshots.docs) {
+        const p = postDoc.data() as StarNode;
+        if (!p) continue;
+        const authorId = p.authorId || p.userId;
+        const authorHandle = (p.author?.handle || '').trim().toLowerCase().replace(/^@/, '');
+        if (
+          authorId === userId ||
+          (normHandle && authorHandle === normHandle)
+        ) {
+          await deleteDoc(doc(firestoreDb, 'posts', postDoc.id)).catch((e) => console.error('[Firebase] Error deleting user post:', e));
+        }
+      }
+
+      // 2e. Delete user's active stories from Firestore
+      const storiesCol = collection(firestoreDb, 'stories');
       const storySnapshots = await getDocs(storiesCol);
       for (const storyDoc of storySnapshots.docs) {
         const st = storyDoc.data() as StarStory;
@@ -327,11 +367,12 @@ export async function deleteUserFromCloud(
           authorId === userId ||
           (normHandle && authorHandle === normHandle)
         ) {
-          await deleteDoc(doc(db, 'stories', storyDoc.id)).catch(() => {});
+          await deleteDoc(doc(firestoreDb, 'stories', storyDoc.id)).catch((e) => console.error('[Firebase] Error deleting user story:', e));
         }
       }
+      console.log('[Firebase] User and related records cleaned from Firestore successfully:', userId);
     } catch (err) {
-      console.warn('[Firebase] deleteUserFromCloud database cleanup error:', err);
+      console.error('[Firebase] deleteUserFromCloud database cleanup error:', err);
     }
   }
 
@@ -511,47 +552,79 @@ export function cacheStars(stars: StarNode[]) {
 }
 
 export function subscribeGlobalStars(onUpdate: (stars: StarNode[]) => void): () => void {
-  let unsubscribeFirestore: Unsubscribe | null = null;
-  const db = getFirebaseFirestore();
+  let unsubscribeStars: Unsubscribe | null = null;
+  let unsubscribePosts: Unsubscribe | null = null;
+  const firestoreDb = db || getFirebaseFirestore();
 
-  if (db) {
+  const cloudStarsMap = new Map<string, StarNode>();
+
+  const emitMergedStars = () => {
+    const cloudStars = Array.from(cloudStarsMap.values());
+    cloudStars.sort((a, b) => {
+      const timeA = new Date(a.createdAt).getTime() || 0;
+      const timeB = new Date(b.createdAt).getTime() || 0;
+      return timeB - timeA;
+    });
+
+    const localStars = getCachedStars();
+    const starMap = new Map<string, StarNode>();
+    localStars.forEach(s => starMap.set(s.id, s));
+    cloudStars.forEach(s => starMap.set(s.id, s));
+    const merged = Array.from(starMap.values());
+
+    cacheStars(merged);
+    onUpdate(merged);
+  };
+
+  if (firestoreDb) {
     try {
-      const starsCol = collection(db, 'stars');
-      unsubscribeFirestore = onSnapshot(
+      // 1. Subscribe to 'stars' collection
+      const starsCol = collection(firestoreDb, 'stars');
+      unsubscribeStars = onSnapshot(
         starsCol,
         (snapshot) => {
-          const cloudStars: StarNode[] = [];
           snapshot.forEach((docSnap) => {
             const data = docSnap.data() as StarNode;
-            if (data && data.id) {
-              cloudStars.push(data);
+            const starId = data.id || docSnap.id;
+            if (data && starId) {
+              cloudStarsMap.set(starId, { ...data, id: starId });
             }
           });
-
-          // Sort by creation or maintain position
-          cloudStars.sort((a, b) => {
-            const timeA = new Date(a.createdAt).getTime() || 0;
-            const timeB = new Date(b.createdAt).getTime() || 0;
-            return timeB - timeA;
-          });
-
-          // Merge with any local unsynced stars
-          const localStars = getCachedStars();
-          const starMap = new Map<string, StarNode>();
-          localStars.forEach(s => starMap.set(s.id, s));
-          cloudStars.forEach(s => starMap.set(s.id, s));
-          const merged = Array.from(starMap.values());
-
-          cacheStars(merged);
-          onUpdate(merged);
+          emitMergedStars();
         },
         (error) => {
-          console.warn('[Firebase] stars onSnapshot error:', error);
+          console.error('[Firebase] stars onSnapshot listener error:', error);
           onUpdate(getCachedStars());
         }
       );
-    } catch {
-      // Fallback
+
+      // 2. Also subscribe to global 'posts' collection
+      const postsCol = collection(firestoreDb, 'posts');
+      unsubscribePosts = onSnapshot(
+        postsCol,
+        (snapshot) => {
+          snapshot.forEach((docSnap) => {
+            const data = docSnap.data() as StarNode;
+            const starId = data.id || docSnap.id;
+            if (data && (data.title || data.content) && starId) {
+              const existing = cloudStarsMap.get(starId);
+              cloudStarsMap.set(starId, {
+                ...data,
+                id: starId,
+                x: data.x ?? existing?.x ?? 0,
+                y: data.y ?? existing?.y ?? 0,
+                radius: data.radius ?? existing?.radius ?? 11,
+              });
+            }
+          });
+          emitMergedStars();
+        },
+        (error) => {
+          console.error('[Firebase] posts onSnapshot listener error:', error);
+        }
+      );
+    } catch (err) {
+      console.error('[Firebase] Failed to attach stars/posts snapshot listeners:', err);
     }
   }
 
@@ -579,8 +652,11 @@ export function subscribeGlobalStars(onUpdate: (stars: StarNode[]) => void): () 
   onUpdate(getCachedStars());
 
   return () => {
-    if (unsubscribeFirestore) {
-      unsubscribeFirestore();
+    if (unsubscribeStars) {
+      unsubscribeStars();
+    }
+    if (unsubscribePosts) {
+      unsubscribePosts();
     }
     if (broadcastChannel) {
       broadcastChannel.removeEventListener('message', handleBroadcast);
@@ -599,18 +675,33 @@ export async function saveStarToCloud(star: StarNode, currentStars: StarNode[]):
   }
   window.dispatchEvent(new CustomEvent('asterful_stars_synced', { detail: { stars: updatedStars } }));
 
-  // Write to Firebase Firestore if connected
-  const db = getFirebaseFirestore();
-  if (db) {
-    try {
-      const starRef = doc(db, 'stars', star.id);
-      await setDoc(starRef, {
+  // Write to Firebase Firestore in global 'posts' collection with addDoc and 'stars' collection with setDoc
+  try {
+    const firestoreDb = db || getFirebaseFirestore();
+    if (firestoreDb) {
+      const postPayload = {
         ...star,
+        createdAt: star.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-      });
-    } catch (err) {
-      console.warn('[Firebase] saveStarToCloud error:', err);
+      };
+
+      // 1. Add to global 'posts' collection using addDoc
+      const postsCol = collection(firestoreDb, 'posts');
+      const postDocRef = await addDoc(postsCol, postPayload);
+      console.log('[Firebase] Post added to global posts collection with addDoc (ID:', postDocRef.id, ')');
+
+      // 2. Save to 'stars' collection using setDoc with star.id
+      const starRef = doc(firestoreDb, 'stars', star.id);
+      await setDoc(starRef, {
+        ...postPayload,
+        postId: postDocRef.id,
+      }, { merge: true });
+      console.log('[Firebase] Star saved to stars collection with setDoc:', star.id);
+    } else {
+      console.warn('[Firebase] Firestore db is not initialized. Please check Firebase environment configuration.');
     }
+  } catch (error) {
+    console.error('[Firebase] Failed to write post/star to Firestore:', error);
   }
 }
 
@@ -628,27 +719,40 @@ export async function updateStarInCloud(
   }
   window.dispatchEvent(new CustomEvent('asterful_stars_synced', { detail: { stars: updatedStars } }));
 
-  // Write to Firebase Firestore if connected
-  const db = getFirebaseFirestore();
-  if (db) {
-    try {
-      const starRef = doc(db, 'stars', starId);
-      await updateDoc(starRef, {
+  // Write updates to Firebase Firestore in 'stars' and 'posts' collections
+  try {
+    const firestoreDb = db || getFirebaseFirestore();
+    if (firestoreDb) {
+      const starRef = doc(firestoreDb, 'stars', starId);
+      const updatePayload = {
         ...updates,
         updatedAt: new Date().toISOString(),
-      });
-    } catch {
-      // If doc does not exist yet, fallback to setDoc
+      };
+
       try {
+        await updateDoc(starRef, updatePayload);
+        console.log('[Firebase] Star updated in stars collection:', starId);
+      } catch {
+        // Fallback to setDoc
         const fullStar = updatedStars.find((s) => s.id === starId);
         if (fullStar) {
-          const starRef = doc(db, 'stars', starId);
-          await setDoc(starRef, { ...fullStar, updatedAt: new Date().toISOString() });
+          await setDoc(starRef, { ...fullStar, ...updatePayload }, { merge: true });
+          console.log('[Firebase] Star created in stars collection via fallback setDoc:', starId);
         }
-      } catch (err) {
-        console.warn('[Firebase] updateStarInCloud error:', err);
+      }
+
+      // Also update matching document in 'posts' collection if exists
+      const postsCol = collection(firestoreDb, 'posts');
+      const postsSnap = await getDocs(postsCol);
+      for (const pDoc of postsSnap.docs) {
+        const pData = pDoc.data() as StarNode;
+        if (pDoc.id === starId || pData.id === starId) {
+          await updateDoc(doc(firestoreDb, 'posts', pDoc.id), updatePayload).catch((e) => console.error('[Firebase] Error updating matching post:', e));
+        }
       }
     }
+  } catch (error) {
+    console.error('[Firebase] Failed to update star/post in Firestore:', error);
   }
 }
 
@@ -661,14 +765,26 @@ export async function deleteStarFromCloud(starId: string, currentStars: StarNode
   }
   window.dispatchEvent(new CustomEvent('asterful_stars_synced', { detail: { stars: updatedStars } }));
 
-  const db = getFirebaseFirestore();
-  if (db) {
-    try {
-      const starRef = doc(db, 'stars', starId);
+  try {
+    const firestoreDb = db || getFirebaseFirestore();
+    if (firestoreDb) {
+      // 1. Delete from 'stars' collection
+      const starRef = doc(firestoreDb, 'stars', starId);
       await deleteDoc(starRef);
-    } catch (err) {
-      console.warn('[Firebase] deleteStarFromCloud error:', err);
+      console.log('[Firebase] Star deleted from stars collection:', starId);
+
+      // 2. Delete from 'posts' collection
+      const postsCol = collection(firestoreDb, 'posts');
+      const postSnapshots = await getDocs(postsCol);
+      for (const pDoc of postSnapshots.docs) {
+        const pData = pDoc.data() as StarNode;
+        if (pDoc.id === starId || pData.id === starId) {
+          await deleteDoc(doc(firestoreDb, 'posts', pDoc.id)).catch((e) => console.error('[Firebase] Error deleting matching post doc:', e));
+        }
+      }
     }
+  } catch (error) {
+    console.error('[Firebase] Failed to delete star/post from Firestore:', error);
   }
 }
 

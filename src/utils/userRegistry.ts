@@ -291,30 +291,41 @@ export async function registerUserAsync(user: User): Promise<RegisterResult> {
   const handle = (user.handle || '').trim().toLowerCase().replace(/^@/, '');
   const displayName = (user.displayName || '').trim();
 
-  // 1. Database & Cache uniqueness check
-  const uniquenessCheck = await checkUserUniquenessInCloud({
-    email,
-    username,
-    handle,
-    displayName,
-    excludeUserId: user.id,
-  });
+  try {
+    // 1. Database & Cache uniqueness check
+    const uniquenessCheck = await checkUserUniquenessInCloud({
+      email,
+      username,
+      handle,
+      displayName,
+      excludeUserId: user.id,
+    });
 
-  if (!uniquenessCheck.isUnique) {
+    if (!uniquenessCheck.isUnique) {
+      return {
+        success: false,
+        field: uniquenessCheck.field,
+        error: uniquenessCheck.error || 'An account with these credentials already exists in the database.',
+      };
+    }
+
+    // 2. Persist to local cache and Cloud Firestore
+    registerUser(user);
+    await saveUserToCloud(user);
+
     return {
-      success: false,
-      field: uniquenessCheck.field,
-      error: uniquenessCheck.error || 'An account with these credentials already exists in the database.',
+      success: true,
+      user,
+    };
+  } catch (err) {
+    console.error('[UserRegistry] Error during registerUserAsync:', err);
+    // Still save locally
+    registerUser(user);
+    return {
+      success: true,
+      user,
     };
   }
-
-  // 2. Persist to local cache and Cloud Firestore
-  registerUser(user);
-
-  return {
-    success: true,
-    user,
-  };
 }
 
 /**
@@ -358,9 +369,11 @@ export function registerUser(user: User): void {
     cacheUsers(allUsers);
 
     // Save to Cloud Firestore
-    saveUserToCloud(updatedUser);
-  } catch {
-    // Ignore storage errors
+    saveUserToCloud(updatedUser).catch((err) => {
+      console.error('[UserRegistry] Error in saveUserToCloud background promise:', err);
+    });
+  } catch (err) {
+    console.error('[UserRegistry] Failed to register user:', err);
   }
 }
 

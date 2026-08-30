@@ -5,6 +5,7 @@ import {
   collection, 
   doc, 
   setDoc, 
+  addDoc,
   getDocs, 
   getDoc,
   deleteDoc, 
@@ -50,62 +51,81 @@ let authInstance: Auth | null = null;
 
 export function isFirebaseConfigured(): boolean {
   return Boolean(
-    firebaseConfig.apiKey &&
-    firebaseConfig.projectId &&
-    firebaseConfig.appId
+    firebaseConfig.projectId || (firebaseConfig.apiKey && firebaseConfig.appId)
   );
 }
 
+try {
+  if (getApps().length > 0) {
+    appInstance = getApp();
+  } else if (isFirebaseConfigured() || firebaseConfig.apiKey || firebaseConfig.projectId) {
+    appInstance = initializeApp(firebaseConfig);
+  }
+
+  if (appInstance) {
+    firestoreInstance = getFirestore(appInstance);
+    authInstance = getAuth(appInstance);
+  }
+} catch (err) {
+  console.error('[Firebase] Failed to initialize Firebase app instance:', err);
+}
+
 export function getFirebaseApp(): FirebaseApp | null {
+  if (appInstance) return appInstance;
   if (!isFirebaseConfigured()) return null;
-  if (!appInstance) {
+  try {
     if (getApps().length > 0) {
       appInstance = getApp();
     } else {
-      try {
-        appInstance = initializeApp(firebaseConfig);
-      } catch (err) {
-        return null;
-      }
+      appInstance = initializeApp(firebaseConfig);
     }
+  } catch (err) {
+    console.error('[Firebase] Error obtaining FirebaseApp:', err);
+    return null;
   }
   return appInstance;
 }
 
 export function getFirebaseFirestore(): Firestore | null {
-  if (!isFirebaseConfigured()) return null;
-  if (!firestoreInstance) {
-    const app = getFirebaseApp();
-    if (app) {
-      try {
-        firestoreInstance = getFirestore(app);
-      } catch (err) {
-        return null;
-      }
+  if (firestoreInstance) return firestoreInstance;
+  const app = getFirebaseApp();
+  if (app) {
+    try {
+      firestoreInstance = getFirestore(app);
+      return firestoreInstance;
+    } catch (err) {
+      console.error('[Firebase] Error obtaining Firestore instance:', err);
+      return null;
     }
   }
-  return firestoreInstance;
+  return null;
 }
 
 export function getFirebaseAuth(): Auth | null {
-  if (!isFirebaseConfigured()) return null;
-  if (!authInstance) {
-    const app = getFirebaseApp();
-    if (app) {
-      try {
-        authInstance = getAuth(app);
-      } catch (err) {
-        return null;
-      }
+  if (authInstance) return authInstance;
+  const app = getFirebaseApp();
+  if (app) {
+    try {
+      authInstance = getAuth(app);
+      return authInstance;
+    } catch (err) {
+      console.error('[Firebase] Error obtaining Auth instance:', err);
+      return null;
     }
   }
-  return authInstance;
+  return null;
 }
+
+// Export primary direct instances for immediate module usage
+export const app: FirebaseApp | null = appInstance;
+export const db: Firestore | null = firestoreInstance;
+export const auth: Auth | null = authInstance;
 
 export { 
   collection, 
   doc, 
   setDoc, 
+  addDoc,
   getDocs, 
   getDoc,
   deleteDoc, 
@@ -123,4 +143,5 @@ export {
   onAuthStateChanged
 };
 export type { Firestore, CollectionReference, DocumentData, Unsubscribe, Auth, FirebaseUser };
+
 
