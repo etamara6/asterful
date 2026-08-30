@@ -259,44 +259,48 @@ export function calculateSpawnPosition(
   cluster: StarCluster,
   existingStars: StarNode[]
 ): { x: number; y: number } {
+  let targetX = 0;
+  let targetY = 0;
+
   if (parentStar) {
-    // Spawn in celestial orbit around the parent star (angle with random variance, radius 120-180)
+    // Spawn in celestial orbit around the parent star (angle with random variance, radius 100-140)
     const angle = Math.random() * Math.PI * 2;
-    const distance = 130 + Math.random() * 60;
-    return {
-      x: parentStar.x + Math.cos(angle) * distance,
-      y: parentStar.y + Math.sin(angle) * distance,
-    };
+    const distance = 100 + Math.random() * 40;
+    targetX = parentStar.x + Math.cos(angle) * distance;
+    targetY = parentStar.y + Math.sin(angle) * distance;
+  } else {
+    // Find center of matching cluster if any exist
+    const clusterStars = existingStars.filter(s => s.cluster === cluster);
+    if (clusterStars.length > 0) {
+      const avgX = clusterStars.reduce((acc, s) => acc + s.x, 0) / clusterStars.length;
+      const avgY = clusterStars.reduce((acc, s) => acc + s.y, 0) / clusterStars.length;
+      const angle = Math.random() * Math.PI * 2;
+      const distance = 80 + Math.random() * 60;
+      targetX = avgX + Math.cos(angle) * distance;
+      targetY = avgY + Math.sin(angle) * distance;
+    } else {
+      // Cluster regional defaults
+      const clusterOffsets: Record<StarCluster, { x: number; y: number }> = {
+        'Digital Art': { x: -350, y: -200 },
+        'Late Night Poetry': { x: 350, y: -180 },
+        'Tech Futures': { x: -280, y: 260 },
+        'Cosmic Philosophy': { x: 300, y: 250 },
+        'Cybernetics': { x: 0, y: 0 },
+        'Our Universe': { x: 0, y: -120 },
+      };
+
+      const center = clusterOffsets[cluster] || { x: 0, y: 0 };
+      const randomOffsetAngle = Math.random() * Math.PI * 2;
+      const randomDist = 40 + Math.random() * 60;
+      targetX = center.x + Math.cos(randomOffsetAngle) * randomDist;
+      targetY = center.y + Math.sin(randomOffsetAngle) * randomDist;
+    }
   }
 
-  // Find center of matching cluster if any exist
-  const clusterStars = existingStars.filter(s => s.cluster === cluster);
-  if (clusterStars.length > 0) {
-    const avgX = clusterStars.reduce((acc, s) => acc + s.x, 0) / clusterStars.length;
-    const avgY = clusterStars.reduce((acc, s) => acc + s.y, 0) / clusterStars.length;
-    const angle = Math.random() * Math.PI * 2;
-    const distance = 140 + Math.random() * 90;
-    return {
-      x: avgX + Math.cos(angle) * distance,
-      y: avgY + Math.sin(angle) * distance,
-    };
-  }
-
-  // Cluster regional defaults
-  const clusterOffsets: Record<StarCluster, { x: number; y: number }> = {
-    'Digital Art': { x: -350, y: -200 },
-    'Late Night Poetry': { x: 350, y: -180 },
-    'Tech Futures': { x: -280, y: 260 },
-    'Cosmic Philosophy': { x: 300, y: 250 },
-    'Cybernetics': { x: 0, y: 0 },
-    'Our Universe': { x: 0, y: -380 },
-  };
-
-  const center = clusterOffsets[cluster] || { x: 0, y: 0 };
-  const randomOffsetAngle = Math.random() * Math.PI * 2;
-  const randomDist = 50 + Math.random() * 80;
+  // Strictly clamp within safe world bounds
+  const SAFE_BOUND = 750;
   return {
-    x: center.x + Math.cos(randomOffsetAngle) * randomDist,
-    y: center.y + Math.sin(randomOffsetAngle) * randomDist,
+    x: Math.max(-SAFE_BOUND, Math.min(SAFE_BOUND, targetX)),
+    y: Math.max(-SAFE_BOUND, Math.min(SAFE_BOUND, targetY)),
   };
 }

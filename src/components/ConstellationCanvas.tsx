@@ -97,6 +97,8 @@ export const ConstellationCanvas: React.FC<ConstellationCanvasProps> = ({
       if (existing) {
         nextMap.set(star.id, {
           ...existing,
+          baseX: star.x,
+          baseY: star.y,
           radius: star.radius,
           cluster: star.cluster,
           universeName: star.universeName,
@@ -106,10 +108,24 @@ export const ConstellationCanvas: React.FC<ConstellationCanvasProps> = ({
           isMutualFriendWithUser,
         });
       } else {
+        let hash = 0;
+        for (let i = 0; i < star.id.length; i++) {
+          hash = (hash << 5) - hash + star.id.charCodeAt(i);
+          hash |= 0;
+        }
+        const absHash = Math.abs(hash);
+        const floatPhase = ((absHash % 1000) / 1000) * Math.PI * 2;
+        const floatSpeed = 0.0010 + (((absHash >> 3) % 100) / 100) * 0.0008;
+        const floatRadius = 3.0 + (((absHash >> 5) % 50) / 50) * 2.5;
+
         nextMap.set(star.id, {
           id: star.id,
           x: star.x,
           y: star.y,
+          baseX: star.x,
+          baseY: star.y,
+          renderX: star.x,
+          renderY: star.y,
           vx: star.vx || 0,
           vy: star.vy || 0,
           radius: star.radius,
@@ -119,6 +135,9 @@ export const ConstellationCanvas: React.FC<ConstellationCanvasProps> = ({
           isFriend,
           isCurrentUser,
           isMutualFriendWithUser,
+          floatPhase,
+          floatSpeed,
+          floatRadius,
         });
       }
     });
@@ -218,8 +237,8 @@ export const ConstellationCanvas: React.FC<ConstellationCanvasProps> = ({
     for (let i = stars.length - 1; i >= 0; i--) {
       const star = stars[i];
       const pNode = physicsNodesRef.current.get(star.id);
-      const posX = pNode ? pNode.x : star.x;
-      const posY = pNode ? pNode.y : star.y;
+      const posX = pNode ? pNode.renderX : star.x;
+      const posY = pNode ? pNode.renderY : star.y;
       const dx = posX - worldPos.x;
       const dy = posY - worldPos.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
@@ -291,7 +310,8 @@ export const ConstellationCanvas: React.FC<ConstellationCanvasProps> = ({
         edges,
         currentUser || null,
         selectedStarId,
-        Math.min(dt / 16, 1.8)
+        Math.min(dt / 16, 1.8),
+        now
       );
 
       const width = cachedWidth;
@@ -416,8 +436,8 @@ export const ConstellationCanvas: React.FC<ConstellationCanvasProps> = ({
       const getNodePos = (star: StarNode) => {
         const pNode = physicsNodesRef.current.get(star.id);
         return {
-          x: pNode ? pNode.x : star.x,
-          y: pNode ? pNode.y : star.y,
+          x: pNode ? pNode.renderX : star.x,
+          y: pNode ? pNode.renderY : star.y,
         };
       };
 

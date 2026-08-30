@@ -5,6 +5,10 @@ export interface PhysicsNode {
   id: string;
   x: number;
   y: number;
+  baseX: number;
+  baseY: number;
+  renderX: number;
+  renderY: number;
   vx: number;
   vy: number;
   radius: number;
@@ -14,6 +18,9 @@ export interface PhysicsNode {
   isFriend: boolean;
   isCurrentUser: boolean;
   isMutualFriendWithUser: boolean;
+  floatPhase: number;
+  floatSpeed: number;
+  floatRadius: number;
 }
 
 export interface PhysicsEdge {
@@ -24,8 +31,8 @@ export interface PhysicsEdge {
   isMutualFriendLink: boolean;
   isOurUniverseLink: boolean;
   isRemix: boolean;
-  linkDistance: number; // 40px to 60px for friends, 160px to 220px for non-friends
-  strength: number;     // 0.8 for friends, 0.2 for non-friends
+  linkDistance: number;
+  strength: number;
 }
 
 // Cluster regional quadrant centers
@@ -37,6 +44,11 @@ export const CLUSTER_ANCHORS: Record<string, { x: number; y: number }> = {
   'Cybernetics': { x: 0, y: 0 },
   'Our Universe': { x: 0, y: -120 },
 };
+
+// Canvas World Space Limits
+export const WORLD_BOUNDS_X = 850;
+export const WORLD_BOUNDS_Y = 850;
+export const MAX_HOME_DISPLACEMENT = 90; // Maximum allowed distance from resting home anchor
 
 /**
  * Resolves author account ID for any star.
@@ -89,26 +101,37 @@ export function evaluateEdgeFriendship(
   const isFriendA = isStarFriend(sourceStar, currentUser);
   const isFriendB = isStarFriend(targetStar, currentUser);
 
-  // If either or both nodes belong to friends or the user
   const isFriendLink = isFriendA || isFriendB;
 
   if (isFriendLink) {
     return {
       isFriendLink: true,
-      linkDistance: 50, // tight 40px - 60px distance
-      strength: 0.8,    // high attraction strength
+      linkDistance: 50,
+      strength: 0.5,
     };
   }
 
   return {
     isFriendLink: false,
-    linkDistance: 190, // wider 160px - 220px distance
-    strength: 0.2,     // lower attraction strength
+    linkDistance: 160,
+    strength: 0.15,
   };
 }
 
 /**
- * Initializes physics nodes from StarNode array with social attributes.
+ * Generates a pseudo-random hash value from a string ID for consistent phase generation.
+ */
+function hashString(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash << 5) - hash + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+/**
+ * Initializes physics nodes from StarNode array with social attributes and resting anchors.
  */
 export function initializePhysicsNodes(
   stars: StarNode[],
@@ -124,10 +147,19 @@ export function initializePhysicsNodes(
     const isCurrentUser = Boolean(currentUser && authorId === currentUser.id);
     const isMutualFriendWithUser = isAuthorMutualFriend(authorId, currentUser, allUsersMap);
 
+    const hash = hashString(star.id);
+    const floatPhase = (hash % 1000) / 1000 * Math.PI * 2;
+    const floatSpeed = 0.0010 + ((hash >> 3) % 100) / 100 * 0.0008;
+    const floatRadius = 3.0 + ((hash >> 5) % 50) / 50 * 2.5;
+
     nodesMap.set(star.id, {
       id: star.id,
       x: star.x,
       y: star.y,
+      baseX: star.x,
+      baseY: star.y,
+      renderX: star.x,
+      renderY: star.y,
       vx: star.vx || 0,
       vy: star.vy || 0,
       radius: star.radius,
@@ -137,6 +169,9 @@ export function initializePhysicsNodes(
       isFriend,
       isCurrentUser,
       isMutualFriendWithUser,
+      floatPhase,
+      floatSpeed,
+      floatRadius,
     });
   });
 
@@ -144,47 +179,37 @@ export function initializePhysicsNodes(
 }
 
 /**
- * Step function for the force-directed social graph simulation.
+ * Step function for the stable, bounded force-directed social graph simulation.
  * Applies:
- * 1. Friend vs Non-Friend Link spring attraction
- * 2. Gravitational Social Hub for friends & "Our Universe"
- * 3. Mutual friend binary gravitational pull
- * 4. Cluster regional anchor guidance
- * 5. Many-body collision avoidance and soft cosmic repulsion
- * 6. Velocity damping
+ * 1. Hooke's Home Restoring Spring to preserve equilibrium & designated quadrants
+ * 2. Gentle friend / mutual friend clustering springs
+ * 3. Bounded link attraction forces
+ * 4. Localized soft collision avoidance (strictly non-overlapping)
+ * 5. Strong velocity damping to stop infinite acceleration
+ * 6. Hard canvas bounding box & maximum displacement constraints
+ * 7. Harmonic floating breathing calculation
  */
 export function stepForceSimulation(
   nodesMap: Map<string, PhysicsNode>,
   edges: ConstellationEdge[],
   currentUser: User | null,
   selectedStarId: string | null,
-  alpha = 1.0
+  alpha = 1.0,
+  time = performance.now()
 ): void {
   const nodes = Array.from(nodesMap.values());
   if (nodes.length === 0) return;
 
-  // 1. Calculate Social Hub Centroid (Center of gravity for friends & user)
+  // 1. Social Hub Centroid Calculation
   let friendSumX = 0;
   let friendSumY = 0;
   let friendCount = 0;
 
-  // Universe cluster centroids
-  const universeCentroids = new Map<string, { sumX: number; sumY: number; count: number }>();
-
   nodes.forEach((node) => {
     if (node.isFriend || node.isCurrentUser) {
-      friendSumX += node.x;
-      friendSumY += node.y;
+      friendSumX += node.baseX;
+      friendSumY += node.baseY;
       friendCount++;
-    }
-
-    if (node.universeName || node.cluster === 'Our Universe') {
-      const uKey = node.universeName || 'Our Universe';
-      const entry = universeCentroids.get(uKey) || { sumX: 0, sumY: 0, count: 0 };
-      entry.sumX += node.x;
-      entry.sumY += node.y;
-      entry.count++;
-      universeCentroids.set(uKey, entry);
     }
   });
 
@@ -193,64 +218,29 @@ export function stepForceSimulation(
     y: friendCount > 0 ? friendSumY / friendCount : 0,
   };
 
-  // 2. Apply Gravitational Social & Universe Clustering Forces
+  // 2. Equilibrium Home Spring & Subtle Social Forces
   nodes.forEach((node) => {
-    // If it's a friend or current user star, apply attraction towards Social Hub
+    // A. Strong Hooke's Home Restoring Spring: pull node towards its base anchor
+    const homeDx = node.baseX - node.x;
+    const homeDy = node.baseY - node.y;
+    const homeSpringStrength = 0.05 * alpha;
+    node.vx += homeDx * homeSpringStrength;
+    node.vy += homeDy * homeSpringStrength;
+
+    // B. Subtle Social Pull for Friends (Gentle nudge towards friend hub)
     if (node.isFriend || node.isCurrentUser) {
       const dx = socialCenter.x - node.x;
       const dy = socialCenter.y - node.y;
-      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-      
-      // Pull friends inward toward dense hub
-      const gravity = 0.045 * alpha;
-      node.vx += (dx / dist) * Math.min(dist * gravity, 4.0);
-      node.vy += (dy / dist) * Math.min(dist * gravity, 4.0);
-
-      // Mutual friends get extra cohesion
-      if (node.isMutualFriendWithUser) {
-        node.vx += dx * 0.02 * alpha;
-        node.vy += dy * 0.02 * alpha;
+      const dist = Math.hypot(dx, dy) || 1;
+      if (dist > 60) {
+        const pull = Math.min((dist - 60) * 0.004, 0.4) * alpha;
+        node.vx += (dx / dist) * pull;
+        node.vy += (dy / dist) * pull;
       }
-    } else {
-      // Non-friends float in outer cosmic space - gentle outward cosmic buoyancy
-      const dx = node.x - socialCenter.x;
-      const dy = node.y - socialCenter.y;
-      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-      if (dist < 180) {
-        const push = ((180 - dist) / 180) * 0.8 * alpha;
-        node.vx += (dx / dist) * push;
-        node.vy += (dy / dist) * push;
-      }
-    }
-
-    // Shared Universe Gravitational Pull (draws Our Universe & named universes into dense galaxy hubs)
-    if (node.universeName || node.cluster === 'Our Universe') {
-      const uKey = node.universeName || 'Our Universe';
-      const uEntry = universeCentroids.get(uKey);
-      if (uEntry && uEntry.count > 1) {
-        const uCenterX = uEntry.sumX / uEntry.count;
-        const uCenterY = uEntry.sumY / uEntry.count;
-        const udx = uCenterX - node.x;
-        const udy = uCenterY - node.y;
-        const uDist = Math.sqrt(udx * udx + udy * udy) || 1;
-        node.vx += (udx / uDist) * Math.min(uDist * 0.05 * alpha, 3.5);
-        node.vy += (udy / uDist) * Math.min(uDist * 0.05 * alpha, 3.5);
-      }
-    }
-
-    // Regional Cluster Anchor Pull
-    const anchor = CLUSTER_ANCHORS[node.cluster];
-    if (anchor) {
-      const cdx = anchor.x - node.x;
-      const cdy = anchor.y - node.y;
-      // Weaker anchor pull for friends so social closeness takes precedence, stronger for non-friends
-      const anchorWeight = node.isFriend ? 0.006 : 0.015;
-      node.vx += cdx * anchorWeight * alpha;
-      node.vy += cdy * anchorWeight * alpha;
     }
   });
 
-  // 3. Link Spring Forces (Differentiating Friend Links vs Non-Friend Links)
+  // 3. Link Spring Forces (Bounded to prevent stretching or explosive forces)
   for (let i = 0; i < edges.length; i++) {
     const edge = edges[i];
     const nodeA = nodesMap.get(edge.sourceId);
@@ -259,30 +249,27 @@ export function stepForceSimulation(
 
     const dx = nodeB.x - nodeA.x;
     const dy = nodeB.y - nodeA.y;
-    const dist = Math.sqrt(dx * dx + dy * dy) || 0.001;
+    const dist = Math.hypot(dx, dy) || 0.001;
 
     const isFriendLink = nodeA.isFriend || nodeB.isFriend;
-
-    // Parameters from requirements:
-    // Friend connections: linkDistance = 40px - 60px, strength = 0.8
-    // Non-friend connections: linkDistance = 160px - 220px, strength = 0.2
-    const targetDist = isFriendLink ? 50 : 190;
-    const strength = isFriendLink ? 0.8 : 0.2;
+    const targetDist = isFriendLink ? 55 : 160;
+    const strength = isFriendLink ? 0.35 : 0.1;
 
     const delta = dist - targetDist;
-    const force = delta * strength * 0.06 * alpha;
+    // Cap spring force to prevent abrupt jumps
+    const maxSpringForce = 0.6;
+    const force = Math.max(-maxSpringForce, Math.min(maxSpringForce, delta * strength * 0.02 * alpha));
 
     const nx = dx / dist;
     const ny = dy / dist;
 
-    // Distribute force to both endpoints
     nodeA.vx += nx * force;
     nodeA.vy += ny * force;
     nodeB.vx -= nx * force;
     nodeB.vy -= ny * force;
   }
 
-  // 4. Many-Body Coulomb Repulsion & Hard Collision Avoidance
+  // 4. Localized Soft Collision Avoidance (ONLY for nearby / overlapping nodes)
   const n = nodes.length;
   for (let i = 0; i < n; i++) {
     const nodeA = nodes[i];
@@ -291,54 +278,83 @@ export function stepForceSimulation(
       const dx = nodeB.x - nodeA.x;
       const dy = nodeB.y - nodeA.y;
       const distSq = dx * dx + dy * dy;
-      const dist = Math.sqrt(distSq) || 0.01;
+      
+      const minDist = nodeA.radius + nodeB.radius + 14;
+      const minDistSq = minDist * minDist;
 
-      // Minimum non-overlapping separation
-      const minDist = nodeA.radius + nodeB.radius + 18;
-
-      if (dist < minDist) {
-        // Strong collision pushback
-        const overlap = (minDist - dist) * 0.5;
+      // Only apply force if they are actually colliding or very close
+      if (distSq < minDistSq && distSq > 0.0001) {
+        const dist = Math.sqrt(distSq);
+        const overlap = (minDist - dist);
+        const push = Math.min(overlap * 0.12, 0.8) * alpha;
         const nx = dx / dist;
         const ny = dy / dist;
-        nodeA.vx -= nx * overlap * 0.4 * alpha;
-        nodeA.vy -= ny * overlap * 0.4 * alpha;
-        nodeB.vx += nx * overlap * 0.4 * alpha;
-        nodeB.vy += ny * overlap * 0.4 * alpha;
-      } else {
-        // Soft electrostatic repulsion
-        const repForce = Math.min(1200 / (distSq + 400), 2.5) * alpha;
-        const nx = dx / dist;
-        const ny = dy / dist;
-        nodeA.vx -= nx * repForce;
-        nodeA.vy -= ny * repForce;
-        nodeB.vx += nx * repForce;
-        nodeB.vy += ny * repForce;
+
+        nodeA.vx -= nx * push;
+        nodeA.vy -= ny * push;
+        nodeB.vx += nx * push;
+        nodeB.vy += ny * push;
       }
     }
   }
 
-  // 5. Velocity Damping & Position Integration
-  const damping = 0.86;
-  const maxSpeed = 7.0;
+  // 5. Velocity Damping, Max Speed Cap, & Position Integration
+  const damping = 0.80; // High damping ensures rapid stabilization
+  const maxSpeed = 2.5;  // Strict speed cap
 
   nodes.forEach((node) => {
-    // Dampen velocities
+    // Apply friction / damping
     node.vx *= damping;
     node.vy *= damping;
 
-    // Cap maximum velocity for smooth orbital motion
-    const speed = Math.sqrt(node.vx * node.vx + node.vy * node.vy);
+    // Cap velocity
+    const speed = Math.hypot(node.vx, node.vy);
     if (speed > maxSpeed) {
       node.vx = (node.vx / speed) * maxSpeed;
       node.vy = (node.vy / speed) * maxSpeed;
     }
 
-    // Stop micro-jitters
-    if (Math.abs(node.vx) < 0.005) node.vx = 0;
-    if (Math.abs(node.vy) < 0.005) node.vy = 0;
+    // Stop micro-jitter
+    if (Math.abs(node.vx) < 0.001) node.vx = 0;
+    if (Math.abs(node.vy) < 0.001) node.vy = 0;
 
+    // Step position
     node.x += node.vx;
     node.y += node.vy;
+
+    // 6. Displacement Constraint: Limit distance from original home anchor
+    const dispX = node.x - node.baseX;
+    const dispY = node.y - node.baseY;
+    const dispDist = Math.hypot(dispX, dispY);
+    if (dispDist > MAX_HOME_DISPLACEMENT) {
+      node.x = node.baseX + (dispX / dispDist) * MAX_HOME_DISPLACEMENT;
+      node.y = node.baseY + (dispY / dispDist) * MAX_HOME_DISPLACEMENT;
+      node.vx *= 0.3;
+      node.vy *= 0.3;
+    }
+
+    // 7. Hard Canvas Bounding Box Constraints
+    if (node.x < -WORLD_BOUNDS_X) {
+      node.x = -WORLD_BOUNDS_X;
+      node.vx = 0;
+    } else if (node.x > WORLD_BOUNDS_X) {
+      node.x = WORLD_BOUNDS_X;
+      node.vx = 0;
+    }
+
+    if (node.y < -WORLD_BOUNDS_Y) {
+      node.y = -WORLD_BOUNDS_Y;
+      node.vy = 0;
+    } else if (node.y > WORLD_BOUNDS_Y) {
+      node.y = WORLD_BOUNDS_Y;
+      node.vy = 0;
+    }
+
+    // 8. Gentle Harmonic Floating & Breathing Offset (Zero coordinate mutation)
+    const floatOffsetX = Math.sin(time * node.floatSpeed + node.floatPhase) * node.floatRadius;
+    const floatOffsetY = Math.cos(time * (node.floatSpeed * 0.8) + node.floatPhase) * (node.floatRadius * 0.8);
+    node.renderX = node.x + floatOffsetX;
+    node.renderY = node.y + floatOffsetY;
   });
 }
+
